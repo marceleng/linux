@@ -362,6 +362,12 @@ struct rt_rq {
 	struct rq *rq;
 	struct task_group *tg;
 #endif
+
+#ifdef CONFIG_SCHED_ORDERED
+	int list_size;
+	int pos_in_list;
+	struct list_head *ordered_list;
+#endif
 };
 
 #ifdef CONFIG_SMP

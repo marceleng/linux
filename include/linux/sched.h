@@ -1,6 +1,9 @@
 #ifndef _LINUX_SCHED_H
 #define _LINUX_SCHED_H
 
+//TODO: remove
+#define CONFIG_SMP
+
 #include <uapi/linux/sched.h>
 
 

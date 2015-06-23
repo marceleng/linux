@@ -800,6 +800,13 @@ static inline int rt_se_prio(struct sched_rt_entity *rt_se)
 	return rt_task_of(rt_se)->prio;
 }
 
+#ifdef CONFIG_SCHED_ORDERED
+static inline int rt_se_pid(struct sched_rt_entity *rt_se)
+{
+	return rt_task_of(rt_se)->pid;
+}
+#endif
+
 static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 {
 	u64 runtime = sched_rt_runtime(rt_rq);
@@ -1301,7 +1308,31 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	BUG_ON(idx >= MAX_RT_PRIO);
 
 	queue = array->queue + idx;
+
 	next = list_entry(queue->next, struct sched_rt_entity, run_list);
+#ifdef CONFIG_SCHED_ORDERED
+	int pid=rt_se_pid(next);
+	int pos_in_batch = &rt_rq->pos_in_list;
+	if (pos_in_list) {
+		int next_pid = *(&rt_rq->ordered_list + pos_in_batch); //The pid of the next process in the list
+		int new_pid;
+
+		for (new_pid=pid; new_pid != next_pid; new_pid = rt_se_pid(next)) {
+			list_rotate_left(queue);
+			next = list_entry(queue->next, struct sched_rt_entity, run_list);
+			if (new_pid == pid) { break; }
+		}
+
+		if(new_pid == next_pid) {
+			&rt_rq->pos_in_list = (&rt_rq->pos_in_list+1) % &rt_rq->list_size;
+		}
+		else { &rt_rq->pos_in_list = 0; }
+	} else{
+		if(pid==*(&rt_rq->ordered_list)) {
+			&rt_rq->pos_in_list++;
+		}
+	}
+#endif
 
 	return next;
 }
