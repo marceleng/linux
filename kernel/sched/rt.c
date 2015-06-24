@@ -1317,7 +1317,11 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	int idx;
 #ifdef CONFIG_SCHED_ORDERED
 	int pid, pos_in_list;
-	int next_pid, new_pid;
+	int next_pid;
+#ifndef GET_PID
+	int new_pid;
+#endif
+	struct task_struct *next_task;
 #endif
 
 	idx = sched_find_first_bit(array->bitmap);
@@ -1334,12 +1338,14 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 		next_pid = sysctl_sched_ordered_proc[pos_in_list]; //The pid of the next process in the list
 
 #ifdef GET_PID
-		struct task_struct *next_task = find_task_by_vpid(next_pid);
+		next_task = find_task_by_vpid(next_pid);
 		if (next_task && &next_task->state==0) {
 			rt_rq->pos_in_list = pos_in_list+1 % sysctl_sched_ordered_proc_number;
+			printk(KERN_WARNING "Chose next task in the list: %d\n",next_pid);
 			return &next_task->rt;
 		}
 		else {
+			printk(KERN_WARNING "Next task not found, sorry\n");
 			rt_rq->pos_in_list=0;
 			return next;
 		}
