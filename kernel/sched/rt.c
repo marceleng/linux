@@ -1361,11 +1361,9 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 		}
 		else { rt_rq->pos_in_list = 0; }
 #endif
-	}else{
-		if(pid==sysctl_sched_ordered_proc[0]) {
-			rt_rq->pos_in_list++;
-			printk(KERN_WARNING "Chosing first task, pointer=%d\n",rt_rq->pos_in_list);
-		}
+	}else if(sysctl_sched_ordered_proc_number && pid==sysctl_sched_ordered_proc[0]) {
+		rt_rq->pos_in_list++;
+		printk(KERN_WARNING "Chosing first task, pointer=%d\n",rt_rq->pos_in_list);
 	}
 
 #endif
