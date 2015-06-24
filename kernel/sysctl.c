@@ -443,6 +443,22 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 #endif
+#ifdef CONFIG_SCHED_ORDERED
+	{
+		.procname   = "sched_ordered_proc_number",
+		.data       = &sysctl_sched_ordered_proc_number,
+		.maxlen     = sizeof(unsigned int),
+		.mode       = 0644,
+		.proc_handler = proc_dointvec,
+	},
+	{
+		.procname   = "sched_ordered_proc",
+		.data       = &sysctl_sched_ordered_proc[0],
+		.maxlen     = 100*sizeof(unsigned int),
+		.mode       = 0644,
+		.proc_handler = proc_dointvec,
+	},
+#endif
 #ifdef CONFIG_CFS_BANDWIDTH
 	{
 		.procname	= "sched_cfs_bandwidth_slice_us",

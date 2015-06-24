@@ -2,12 +2,18 @@
  * Real-Time Scheduling Class (mapped to the SCHED_FIFO and SCHED_RR
  * policies)
  */
+#define GET_PID
 
 #include "sched.h"
-
 #include <linux/slab.h>
+#include <linux/sched/sysctl.h>
 
 int sched_rr_timeslice = RR_TIMESLICE;
+
+#ifdef CONFIG_SCHED_ORDERED
+unsigned int sysctl_sched_ordered_proc_number;
+unsigned int sysctl_sched_ordered_proc[100];
+#endif
 
 static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun);
 
@@ -84,6 +90,12 @@ void init_rt_rq(struct rt_rq *rt_rq, struct rq *rq)
 	rt_rq->rt_throttled = 0;
 	rt_rq->rt_runtime = 0;
 	raw_spin_lock_init(&rt_rq->rt_runtime_lock);
+
+#ifdef CONFIG_SCHED_ORDERED
+	rt_rq->pos_in_list = 0;
+	sysctl_sched_ordered_proc_number = 0;
+	sysctl_sched_ordered_proc[0] = 0;
+#endif
 }
 
 #ifdef CONFIG_RT_GROUP_SCHED
@@ -1303,6 +1315,10 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	struct sched_rt_entity *next = NULL;
 	struct list_head *queue;
 	int idx;
+#ifdef CONFIG_SCHED_ORDERED
+	int pid, pos_in_list;
+	int next_pid, new_pid;
+#endif
 
 	idx = sched_find_first_bit(array->bitmap);
 	BUG_ON(idx >= MAX_RT_PRIO);
@@ -1311,12 +1327,23 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 
 	next = list_entry(queue->next, struct sched_rt_entity, run_list);
 #ifdef CONFIG_SCHED_ORDERED
-	int pid=rt_se_pid(next);
-	int pos_in_batch = &rt_rq->pos_in_list;
-	if (pos_in_list) {
-		int next_pid = *(&rt_rq->ordered_list + pos_in_batch); //The pid of the next process in the list
-		int new_pid;
 
+	pid=rt_se_pid(next);
+	pos_in_list = rt_rq->pos_in_list;
+	if (pos_in_list) {
+		next_pid = sysctl_sched_ordered_proc[pos_in_list]; //The pid of the next process in the list
+
+#ifdef GET_PID
+		struct task_struct *next_task = find_task_by_vpid(next_pid);
+		if (next_task && &next_task->state==0) {
+			rt_rq->pos_in_list = pos_in_list+1 % sysctl_sched_ordered_proc_number;
+			return &next_task->rt;
+		}
+		else {
+			rt_rq->pos_in_list=0;
+			return next;
+		}
+#else
 		for (new_pid=pid; new_pid != next_pid; new_pid = rt_se_pid(next)) {
 			list_rotate_left(queue);
 			next = list_entry(queue->next, struct sched_rt_entity, run_list);
@@ -1324,14 +1351,16 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 		}
 
 		if(new_pid == next_pid) {
-			&rt_rq->pos_in_list = (&rt_rq->pos_in_list+1) % &rt_rq->list_size;
+			rt_rq->pos_in_list = (pos_in_list+1) % sysctl_sched_ordered_proc_number;
 		}
-		else { &rt_rq->pos_in_list = 0; }
-	} else{
-		if(pid==*(&rt_rq->ordered_list)) {
-			&rt_rq->pos_in_list++;
+		else { rt_rq->pos_in_list = 0; }
+#endif
+	}else{
+		if(pid==sysctl_sched_ordered_proc[0]) {
+			rt_rq->pos_in_list++;
 		}
 	}
+
 #endif
 
 	return next;

@@ -364,9 +364,9 @@ struct rt_rq {
 #endif
 
 #ifdef CONFIG_SCHED_ORDERED
-	int list_size;
+	//int list_size;
 	int pos_in_list;
-	struct list_head *ordered_list;
+	//struct list_head *ordered_list;
 #endif
 };
 
