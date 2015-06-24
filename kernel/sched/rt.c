@@ -1334,7 +1334,7 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 
 	pid=rt_se_pid(next);
 	pos_in_list = rt_rq->pos_in_list;
-	if (pos_in_list) {
+	if (sysctl_sched_ordered_proc_number && pos_in_list) {
 		next_pid = sysctl_sched_ordered_proc[pos_in_list]; //The pid of the next process in the list
 
 #ifdef GET_PID
@@ -1345,7 +1345,7 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 			return &next_task->rt;
 		}
 		else {
-			printk(KERN_WARNING "Next task not found, sorry\n");
+			printk(KERN_WARNING "Next task not found. Defaulting to %d\n",rt_se_pid(next));
 			rt_rq->pos_in_list=0;
 			return next;
 		}
@@ -1363,6 +1363,7 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 #endif
 	}else{
 		if(pid==sysctl_sched_ordered_proc[0]) {
+			printk(KERN_WARNING "Chosing first task");
 			rt_rq->pos_in_list++;
 		}
 	}
