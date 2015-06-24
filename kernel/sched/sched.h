@@ -7,6 +7,7 @@
 #include <linux/stop_machine.h>
 #include <linux/tick.h>
 #include <linux/slab.h>
+#include <linux/hashtable.h>
 
 #include "cpupri.h"
 #include "cpuacct.h"
@@ -366,7 +367,7 @@ struct rt_rq {
 #ifdef CONFIG_SCHED_ORDERED
 	//int list_size;
 	int pos_in_list;
-	//struct list_head *ordered_list;
+	struct sched_rt_entity* ordered_se_array[100];
 #endif
 };
 

@@ -7,6 +7,7 @@
 #include "sched.h"
 #include <linux/slab.h>
 #include <linux/sched/sysctl.h>
+#include <linux/hashtable.h>
 
 int sched_rr_timeslice = RR_TIMESLICE;
 
@@ -95,6 +96,7 @@ void init_rt_rq(struct rt_rq *rt_rq, struct rq *rq)
 	rt_rq->pos_in_list = 0;
 	sysctl_sched_ordered_proc_number = 0;
 	sysctl_sched_ordered_proc[0] = 0;
+	for (i=0; i<100; i++) { rt_rq->ordered_se_array[i] = NULL; }
 #endif
 }
 
@@ -1060,12 +1062,26 @@ void dec_rt_tasks(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 	dec_rt_group(rt_se, rt_rq);
 }
 
+#ifdef CONFIG_SCHED_PROC_ORDERED
+static int inline is_ordered_proc(int pid, struct rt_rq *rt_rq) {
+	int i;
+	for (i=0; i<sysctl_sched_ordered_proc_number; i++) {
+		if (pid == sysctl_sched_ordered_proc[i]) { return i; }
+	}
+	return 0;
+}
+#endif
+
 static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, bool head)
 {
 	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
 	struct rt_prio_array *array = &rt_rq->active;
 	struct rt_rq *group_rq = group_rt_rq(rt_se);
 	struct list_head *queue = array->queue + rt_se_prio(rt_se);
+#ifdef CONFIG_SCHED_PROC_ORDERED
+	int pid = rt_se_pid(rt_se);
+	int idx;
+#endif
 
 	/*
 	 * Don't enqueue the group if its throttled, or when empty.
@@ -1082,6 +1098,10 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, bool head)
 		list_add_tail(&rt_se->run_list, queue);
 	__set_bit(rt_se_prio(rt_se), array->bitmap);
 
+#ifdef CONFIG_SCHED_ORDERED
+	if (idx=is_ordered_proc(pid,rt_rq)) { rt_rq->ordered_se_array[i] = rt_se; }
+#endif
+
 	inc_rt_tasks(rt_se, rt_rq);
 }
 
@@ -1090,9 +1110,18 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se)
 	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
 	struct rt_prio_array *array = &rt_rq->active;
 
+#ifdef CONFIG_SCHED_PROC_ORDERED
+	int pid = rt_se_pid(rt_se);
+	int idx;
+#endif
+
 	list_del_init(&rt_se->run_list);
 	if (list_empty(array->queue + rt_se_prio(rt_se)))
 		__clear_bit(rt_se_prio(rt_se), array->bitmap);
+
+#ifdef CONFIG_SCHED_ORDERED
+	if (idx=is_ordered_proc(pid,rt_rq)) { rt_rq->ordered_se_array[i] = NULL; }
+#endif
 
 	dec_rt_tasks(rt_se, rt_rq);
 }
@@ -1332,13 +1361,13 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	next = list_entry(queue->next, struct sched_rt_entity, run_list);
 #ifdef CONFIG_SCHED_ORDERED
 
-	pid=rt_se_pid(next);
 	pos_in_list = rt_rq->pos_in_list;
+	pid=rt_se_pid(next);
 	if (sysctl_sched_ordered_proc_number && pos_in_list) {
 		next_pid = sysctl_sched_ordered_proc[pos_in_list]; //The pid of the next process in the list
 
 #ifdef GET_PID
-		next_task = find_task_by_vpid(next_pid);
+		next_task = rt_rq->ordered_se_array[pos_in_list];
 		if (next_task && &next_task->state==0) {
 			rt_rq->pos_in_list = pos_in_list+1 % sysctl_sched_ordered_proc_number;
 			printk(KERN_WARNING "Chose next task in the list: %d\n",next_pid);
