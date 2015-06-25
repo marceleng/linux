@@ -1479,7 +1479,7 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 		printk(KERN_WARNING "PID: %d",p->pid);
 		LOSE_TIME(idx,temp)
 	}
-	if(sysctl_sched_ordered_proc_number && (p->pid==sysctl_sched_ordered_proc[0])) {
+	if(p && sysctl_sched_ordered_proc_number && (p->pid==sysctl_sched_ordered_proc[0])) {
 		printk(KERN_WARNING "REMOVE ME: Found first task\n");
 		LOSE_TIME(idx,temp)
 		rt_rq->pos_in_list=1;
