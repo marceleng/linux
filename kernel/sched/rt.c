@@ -1474,7 +1474,7 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 
 #ifdef CONFIG_SCHED_ORDERED
 	if(sysctl_sched_ordered_proc_number) {
-		printk(KERN_WARNING "REMOVE ME: it's on %d\n",p->pid);
+		printk(KERN_WARNING "REMOVE ME: it's on 1\n");
 		LOSE_TIME(idx,temp)
 		printk(KERN_WARNING "PID: %d",p->pid);
 		LOSE_TIME(idx,temp)
