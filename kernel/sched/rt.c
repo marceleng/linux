@@ -3,6 +3,8 @@
  * policies)
  */
 #define GET_PID
+#define LOSE_TIME(idx,temp) \
+	for(idx=0;idx<10000000;idx++) {temp += idx*idx;}
 
 #include "sched.h"
 #include <linux/slab.h>
@@ -1062,7 +1064,7 @@ void dec_rt_tasks(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 	dec_rt_group(rt_se, rt_rq);
 }
 
-#ifdef CONFIG_SCHED_PROC_ORDERED
+#ifdef CONFIG_SCHED_ORDERED
 static int inline is_ordered_proc(int pid, struct rt_rq *rt_rq) {
 	int i;
 	for (i=0; i<sysctl_sched_ordered_proc_number; i++) {
@@ -1078,10 +1080,7 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, bool head)
 	struct rt_prio_array *array = &rt_rq->active;
 	struct rt_rq *group_rq = group_rt_rq(rt_se);
 	struct list_head *queue = array->queue + rt_se_prio(rt_se);
-#ifdef CONFIG_SCHED_PROC_ORDERED
-	int pid = rt_se_pid(rt_se);
-	int idx;
-#endif
+
 
 	/*
 	 * Don't enqueue the group if its throttled, or when empty.
@@ -1098,10 +1097,6 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, bool head)
 		list_add_tail(&rt_se->run_list, queue);
 	__set_bit(rt_se_prio(rt_se), array->bitmap);
 
-#ifdef CONFIG_SCHED_ORDERED
-	if (idx=is_ordered_proc(pid,rt_rq)) { rt_rq->ordered_se_array[i] = rt_se; }
-#endif
-
 	inc_rt_tasks(rt_se, rt_rq);
 }
 
@@ -1110,18 +1105,9 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se)
 	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
 	struct rt_prio_array *array = &rt_rq->active;
 
-#ifdef CONFIG_SCHED_PROC_ORDERED
-	int pid = rt_se_pid(rt_se);
-	int idx;
-#endif
-
 	list_del_init(&rt_se->run_list);
 	if (list_empty(array->queue + rt_se_prio(rt_se)))
 		__clear_bit(rt_se_prio(rt_se), array->bitmap);
-
-#ifdef CONFIG_SCHED_ORDERED
-	if (idx=is_ordered_proc(pid,rt_rq)) { rt_rq->ordered_se_array[i] = NULL; }
-#endif
 
 	dec_rt_tasks(rt_se, rt_rq);
 }
@@ -1162,6 +1148,7 @@ static void dequeue_rt_entity(struct sched_rt_entity *rt_se)
 		if (rt_rq && rt_rq->rt_nr_running)
 			__enqueue_rt_entity(rt_se, false);
 	}
+
 }
 
 /*
@@ -1170,6 +1157,12 @@ static void dequeue_rt_entity(struct sched_rt_entity *rt_se)
 static void
 enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 {
+#ifdef CONFIG_SCHED_ORDERED
+	int pid = p->pid;
+	int idx;
+	struct rt_rq *rt_rq = &rq->rt;
+#endif
+
 	struct sched_rt_entity *rt_se = &p->rt;
 
 	if (flags & ENQUEUE_WAKEUP)
@@ -1181,10 +1174,23 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 		enqueue_pushable_task(rq, p);
 
 	inc_nr_running(rq);
+
+#ifdef CONFIG_SCHED_ORDERED
+	idx=is_ordered_proc(pid,rt_rq);
+	if (idx) {
+		rt_rq->ordered_se_array[idx] = p;
+		printk(KERN_WARNING "REMOVE ME: task %d found at index %d\n",pid,idx);
+	}
+#endif
 }
 
 static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 {
+#ifdef CONFIG_SCHED_ORDERED
+	struct rt_rq *rt_rq = &rq->rt;
+	int pid = p->pid;
+	int idx;
+#endif
 	struct sched_rt_entity *rt_se = &p->rt;
 
 	update_curr_rt(rq);
@@ -1193,6 +1199,13 @@ static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 	dequeue_pushable_task(rq, p);
 
 	dec_nr_running(rq);
+#ifdef CONFIG_SCHED_ORDERED
+	idx=is_ordered_proc(pid,rt_rq);
+	if (idx) {
+		rt_rq->ordered_se_array[idx] = NULL;
+		printk(KERN_WARNING "REMOVE ME: task %d dequeued from index %d\n",pid,idx);
+	}
+#endif
 }
 
 /*
@@ -1226,6 +1239,7 @@ static void requeue_task_rt(struct rq *rq, struct task_struct *p, int head)
 
 static void yield_task_rt(struct rq *rq)
 {
+	printk(KERN_WARNING "REMOVE ME: %d is yielding priority\n",rq->curr->pid);
 	requeue_task_rt(rq, rq->curr, 0);
 }
 
@@ -1344,13 +1358,13 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	struct sched_rt_entity *next = NULL;
 	struct list_head *queue;
 	int idx;
-#ifdef CONFIG_SCHED_ORDERED
+#ifdef CONFIG_SCHED_ORDERED_1
 	int pid, pos_in_list;
 	int next_pid;
 #ifndef GET_PID
 	int new_pid;
 #endif
-	struct task_struct *next_task;
+	struct sched_rt_entity *next_task;
 #endif
 
 	idx = sched_find_first_bit(array->bitmap);
@@ -1359,7 +1373,7 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	queue = array->queue + idx;
 
 	next = list_entry(queue->next, struct sched_rt_entity, run_list);
-#ifdef CONFIG_SCHED_ORDERED
+#ifdef CONFIG_SCHED_ORDERED_1
 
 	pos_in_list = rt_rq->pos_in_list;
 	pid=rt_se_pid(next);
@@ -1368,13 +1382,13 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 
 #ifdef GET_PID
 		next_task = rt_rq->ordered_se_array[pos_in_list];
-		if (next_task && &next_task->state==0) {
+		if (next_task) {
 			rt_rq->pos_in_list = pos_in_list+1 % sysctl_sched_ordered_proc_number;
-			printk(KERN_WARNING "Chose next task in the list: %d\n",next_pid);
-			return &next_task->rt;
+			//printk(KERN_WARNING "Chose next task in the list: %d\n",next_pid);
+			return next_task;
 		}
 		else {
-			printk(KERN_WARNING "Next task not found. Defaulting to %d\n",rt_se_pid(next));
+			//printk(KERN_WARNING "Next task not found. Defaulting to %d\n",rt_se_pid(next));
 			rt_rq->pos_in_list=0;
 			return next;
 		}
@@ -1392,7 +1406,7 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 #endif
 	}else if(sysctl_sched_ordered_proc_number && pid==sysctl_sched_ordered_proc[0]) {
 		rt_rq->pos_in_list++;
-		printk(KERN_WARNING "Chosing first task, pointer=%d\n",rt_rq->pos_in_list);
+		//printk(KERN_WARNING "Chosing first task, pointer=%d\n",rt_rq->pos_in_list);
 	}
 
 #endif
@@ -1428,7 +1442,54 @@ static struct task_struct *_pick_next_task_rt(struct rq *rq)
 
 static struct task_struct *pick_next_task_rt(struct rq *rq)
 {
-	struct task_struct *p = _pick_next_task_rt(rq);
+
+	struct task_struct *p;
+#ifdef CONFIG_SCHED_ORDERED
+	struct rt_rq *rt_rq;
+	struct task_struct *next_task_in_list;
+	int pos_in_list,idx,temp;
+	rt_rq = &rq->rt;
+	pos_in_list = rt_rq->pos_in_list;
+
+	if(sysctl_sched_ordered_proc_number) {
+			printk(KERN_WARNING "REMOVE ME: it's on %d\n",sysctl_sched_ordered_proc[0]);
+			LOSE_TIME(idx,temp)
+	}
+
+	if(sysctl_sched_ordered_proc_number && pos_in_list) {
+		printk(KERN_WARNING "REMOVE ME: A\n");
+		next_task_in_list = rt_rq->ordered_se_array[pos_in_list];
+		printk(KERN_WARNING "REMOVE ME: B\n");
+		if(next_task_in_list && next_task_in_list->state==0) {
+			printk(KERN_WARNING "REMOVE ME: C\n");
+			rt_rq->pos_in_list++;
+			printk(KERN_WARNING "REMOVE ME: Found next task at index %d",sysctl_sched_ordered_proc[0]);
+			return next_task_in_list;
+		}
+		printk(KERN_WARNING "REMOVE ME: D\n");
+	}
+#endif
+
+	p = _pick_next_task_rt(rq);
+
+#ifdef CONFIG_SCHED_ORDERED
+	if(sysctl_sched_ordered_proc_number) {
+		printk(KERN_WARNING "REMOVE ME: it's on %d\n",p->pid);
+		LOSE_TIME(idx,temp)
+		printk(KERN_WARNING "PID: %d",p->pid);
+		LOSE_TIME(idx,temp)
+	}
+	if(sysctl_sched_ordered_proc_number && (p->pid==sysctl_sched_ordered_proc[0])) {
+		printk(KERN_WARNING "REMOVE ME: Found first task\n");
+		LOSE_TIME(idx,temp)
+		rt_rq->pos_in_list=1;
+	}
+	else if (sysctl_sched_ordered_proc_number){
+		printk(KERN_WARNING "NOTHING HERE\n");
+		LOSE_TIME(idx,temp)
+		rt_rq->pos_in_list=0;
+	}
+#endif
 
 	/* The running task is never eligible for pushing */
 	if (p)

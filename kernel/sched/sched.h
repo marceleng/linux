@@ -367,7 +367,7 @@ struct rt_rq {
 #ifdef CONFIG_SCHED_ORDERED
 	//int list_size;
 	int pos_in_list;
-	struct sched_rt_entity* ordered_se_array[100];
+	struct task_struct* ordered_se_array[100];
 #endif
 };
 
