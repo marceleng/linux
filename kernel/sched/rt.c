@@ -1447,53 +1447,38 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 #ifdef CONFIG_SCHED_ORDERED
 	struct rt_rq *rt_rq;
 	struct task_struct *next_task_in_list;
-	int pos_in_list,idx,temp;
+	int pos_in_list;
 	rt_rq = &rq->rt;
 	pos_in_list = rt_rq->pos_in_list;
 
-	if(sysctl_sched_ordered_proc_number) {
-			printk(KERN_WARNING "REMOVE ME: it's on %d\n",sysctl_sched_ordered_proc[0]);
-			LOSE_TIME(idx,temp)
-	}
-
 	if(sysctl_sched_ordered_proc_number && pos_in_list) {
-		printk(KERN_WARNING "REMOVE ME: A\n");
 		next_task_in_list = rt_rq->ordered_se_array[pos_in_list];
-		printk(KERN_WARNING "REMOVE ME: B\n");
 		if(next_task_in_list && next_task_in_list->state==0) {
-			printk(KERN_WARNING "REMOVE ME: C\n");
 			rt_rq->pos_in_list++;
-			printk(KERN_WARNING "REMOVE ME: Found next task at index %d",sysctl_sched_ordered_proc[0]);
+			printk(KERN_WARNING "REMOVE ME: Next task: %d\n",next_task_in_list->pid);
+			//printk(KERN_WARNING "REMOVE ME: Found next task at index %d",sysctl_sched_ordered_proc[0]);
 			return next_task_in_list;
 		}
-		printk(KERN_WARNING "REMOVE ME: D\n");
 	}
 #endif
 
 	p = _pick_next_task_rt(rq);
 
 #ifdef CONFIG_SCHED_ORDERED
-	if(sysctl_sched_ordered_proc_number) {
-		printk(KERN_WARNING "REMOVE ME: it's on 1\n");
-		LOSE_TIME(idx,temp)
-		printk(KERN_WARNING "PID: %d",p->pid);
-		LOSE_TIME(idx,temp)
-	}
+
 	if(p && sysctl_sched_ordered_proc_number && (p->pid==sysctl_sched_ordered_proc[0])) {
-		printk(KERN_WARNING "REMOVE ME: Found first task\n");
-		LOSE_TIME(idx,temp)
 		rt_rq->pos_in_list=1;
 	}
 	else if (sysctl_sched_ordered_proc_number){
-		printk(KERN_WARNING "NOTHING HERE\n");
-		LOSE_TIME(idx,temp)
 		rt_rq->pos_in_list=0;
 	}
 #endif
 
 	/* The running task is never eligible for pushing */
-	if (p)
+	if (p) {
 		dequeue_pushable_task(rq, p);
+		printk(KERN_WARNING "REMOVE ME: Next task: %d\n",p->pid);
+	}
 
 #ifdef CONFIG_SMP
 	/*
