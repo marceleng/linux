@@ -15,7 +15,7 @@ int sched_rr_timeslice = RR_TIMESLICE;
 
 #ifdef CONFIG_SCHED_ORDERED
 unsigned int sysctl_sched_ordered_proc_number;
-unsigned int sysctl_sched_ordered_proc[100];
+unsigned int sysctl_sched_ordered_proc[200];
 #endif
 
 static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun);
@@ -1170,18 +1170,20 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 
 	enqueue_rt_entity(rt_se, flags & ENQUEUE_HEAD);
 
-	if (!task_current(rq, p) && p->nr_cpus_allowed > 1)
-		enqueue_pushable_task(rq, p);
-
-	inc_nr_running(rq);
-
 #ifdef CONFIG_SCHED_ORDERED
 	idx=is_ordered_proc(pid,rt_rq);
 	if (idx) {
 		rt_rq->ordered_se_array[idx] = p;
-		printk(KERN_WARNING "REMOVE ME: task %d found at index %d\n",pid,idx);
 	}
+	else if (!task_current(rq,p) && p->nr_cpus_allowed > 1)
+		enqueue_pushable_task(rq, p);
+#else
+	if (!task_current(rq, p) && p->nr_cpus_allowed > 1)
+		enqueue_pushable_task(rq, p);
 #endif
+
+	inc_nr_running(rq);
+
 }
 
 static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
@@ -1203,7 +1205,6 @@ static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 	idx=is_ordered_proc(pid,rt_rq);
 	if (idx) {
 		rt_rq->ordered_se_array[idx] = NULL;
-		printk(KERN_WARNING "REMOVE ME: task %d dequeued from index %d\n",pid,idx);
 	}
 #endif
 }
@@ -1239,7 +1240,6 @@ static void requeue_task_rt(struct rq *rq, struct task_struct *p, int head)
 
 static void yield_task_rt(struct rq *rq)
 {
-	printk(KERN_WARNING "REMOVE ME: %d is yielding priority\n",rq->curr->pid);
 	requeue_task_rt(rq, rq->curr, 0);
 }
 
@@ -1455,8 +1455,9 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 		next_task_in_list = rt_rq->ordered_se_array[pos_in_list];
 		if(next_task_in_list && next_task_in_list->state==0) {
 			rt_rq->pos_in_list++;
-			printk(KERN_WARNING "REMOVE ME: Next task: %d\n",next_task_in_list->pid);
-			//printk(KERN_WARNING "REMOVE ME: Found next task at index %d",sysctl_sched_ordered_proc[0]);
+			next_task_in_list->se.exec_start = rq_clock_task(rq);
+			requeue_task_rt(rq, next_task_in_list, 0); // Put task back to the end of the queue
+			dequeue_pushable_task(rq, next_task_in_list); //Removes tasks from pushable
 			return next_task_in_list;
 		}
 	}
@@ -1477,7 +1478,6 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 	/* The running task is never eligible for pushing */
 	if (p) {
 		dequeue_pushable_task(rq, p);
-		printk(KERN_WARNING "REMOVE ME: Next task: %d\n",p->pid);
 	}
 
 #ifdef CONFIG_SMP

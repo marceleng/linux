@@ -94,7 +94,7 @@ extern int sched_rr_timeslice;
 
 #ifdef CONFIG_SCHED_ORDERED
 extern unsigned int sysctl_sched_ordered_proc_number;
-extern unsigned int sysctl_sched_ordered_proc[100];
+extern unsigned int sysctl_sched_ordered_proc[200];
 #endif
 
 extern int sched_rr_handler(struct ctl_table *table, int write,

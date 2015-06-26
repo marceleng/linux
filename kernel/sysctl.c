@@ -454,7 +454,7 @@ static struct ctl_table kern_table[] = {
 	{
 		.procname   = "sched_ordered_proc",
 		.data       = &sysctl_sched_ordered_proc[0],
-		.maxlen     = 100*sizeof(unsigned int),
+		.maxlen     = 200*sizeof(unsigned int),
 		.mode       = 0644,
 		.proc_handler = proc_dointvec,
 	},
