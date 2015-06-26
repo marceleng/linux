@@ -365,8 +365,9 @@ struct rt_rq {
 #endif
 
 #ifdef CONFIG_SCHED_ORDERED
-	//int list_size;
+	/*Pointer towards the current positions in the list of ordered process*/
 	int pos_in_list;
+	/*Pointer storing the structures  */
 	struct task_struct* ordered_se_array[100];
 #endif
 };

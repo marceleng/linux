@@ -98,7 +98,7 @@ void init_rt_rq(struct rt_rq *rt_rq, struct rq *rq)
 	rt_rq->pos_in_list = 0;
 	sysctl_sched_ordered_proc_number = 0;
 	sysctl_sched_ordered_proc[0] = 0;
-	for (i=0; i<100; i++) { rt_rq->ordered_se_array[i] = NULL; }
+	for (i=0; i<200; i++) { rt_rq->ordered_se_array[i] = NULL; }
 #endif
 }
 
@@ -816,13 +816,6 @@ static inline int rt_se_prio(struct sched_rt_entity *rt_se)
 	return rt_task_of(rt_se)->prio;
 }
 
-#ifdef CONFIG_SCHED_ORDERED
-static inline int rt_se_pid(struct sched_rt_entity *rt_se)
-{
-	return rt_task_of(rt_se)->pid;
-}
-#endif
-
 static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 {
 	u64 runtime = sched_rt_runtime(rt_rq);
@@ -1358,14 +1351,6 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	struct sched_rt_entity *next = NULL;
 	struct list_head *queue;
 	int idx;
-#ifdef CONFIG_SCHED_ORDERED_1
-	int pid, pos_in_list;
-	int next_pid;
-#ifndef GET_PID
-	int new_pid;
-#endif
-	struct sched_rt_entity *next_task;
-#endif
 
 	idx = sched_find_first_bit(array->bitmap);
 	BUG_ON(idx >= MAX_RT_PRIO);
@@ -1373,44 +1358,6 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	queue = array->queue + idx;
 
 	next = list_entry(queue->next, struct sched_rt_entity, run_list);
-#ifdef CONFIG_SCHED_ORDERED_1
-
-	pos_in_list = rt_rq->pos_in_list;
-	pid=rt_se_pid(next);
-	if (sysctl_sched_ordered_proc_number && pos_in_list) {
-		next_pid = sysctl_sched_ordered_proc[pos_in_list]; //The pid of the next process in the list
-
-#ifdef GET_PID
-		next_task = rt_rq->ordered_se_array[pos_in_list];
-		if (next_task) {
-			rt_rq->pos_in_list = pos_in_list+1 % sysctl_sched_ordered_proc_number;
-			//printk(KERN_WARNING "Chose next task in the list: %d\n",next_pid);
-			return next_task;
-		}
-		else {
-			//printk(KERN_WARNING "Next task not found. Defaulting to %d\n",rt_se_pid(next));
-			rt_rq->pos_in_list=0;
-			return next;
-		}
-#else
-		for (new_pid=pid; new_pid != next_pid; new_pid = rt_se_pid(next)) {
-			list_rotate_left(queue);
-			next = list_entry(queue->next, struct sched_rt_entity, run_list);
-			if (new_pid == pid) { break; }
-		}
-
-		if(new_pid == next_pid) {
-			rt_rq->pos_in_list = (pos_in_list+1) % sysctl_sched_ordered_proc_number;
-		}
-		else { rt_rq->pos_in_list = 0; }
-#endif
-	}else if(sysctl_sched_ordered_proc_number && pid==sysctl_sched_ordered_proc[0]) {
-		rt_rq->pos_in_list++;
-		//printk(KERN_WARNING "Chosing first task, pointer=%d\n",rt_rq->pos_in_list);
-	}
-
-#endif
-
 	return next;
 }
 
@@ -1451,7 +1398,11 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 	rt_rq = &rq->rt;
 	pos_in_list = rt_rq->pos_in_list;
 
+	/*
+	 * This should be more integrated with the rest and not return that early
+	 */
 	if(sysctl_sched_ordered_proc_number && pos_in_list) {
+		/* Find next task in ordered list */
 		next_task_in_list = rt_rq->ordered_se_array[pos_in_list];
 		if(next_task_in_list && next_task_in_list->state==0) {
 			rt_rq->pos_in_list++;
@@ -1467,9 +1418,11 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 
 #ifdef CONFIG_SCHED_ORDERED
 
+	/* If this is the first process increment the pointer */
 	if(p && sysctl_sched_ordered_proc_number && (p->pid==sysctl_sched_ordered_proc[0])) {
 		rt_rq->pos_in_list=1;
-	}
+	}̈́
+	/* Otherwise reset the pointer */
 	else if (sysctl_sched_ordered_proc_number){
 		rt_rq->pos_in_list=0;
 	}
