@@ -362,9 +362,6 @@ static int iio_device_add_event(struct iio_dev *indio_dev,
 			&indio_dev->event_interface->dev_attr_list);
 		kfree(postfix);
 
-		if ((ret == -EBUSY) && (shared_by != IIO_SEPARATE))
-			continue;
-
 		if (ret)
 			return ret;
 
@@ -596,7 +593,6 @@ int iio_device_register_eventset(struct iio_dev *indio_dev)
 error_free_setup_event_lines:
 	iio_free_chan_devattr_list(&indio_dev->event_interface->dev_attr_list);
 	kfree(indio_dev->event_interface);
-	indio_dev->event_interface = NULL;
 error_ret:
 
 	return ret;

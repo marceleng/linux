@@ -19,13 +19,13 @@ struct mnt_pcp {
 };
 
 struct mountpoint {
-	struct hlist_node m_hash;
+	struct list_head m_hash;
 	struct dentry *m_dentry;
 	int m_count;
 };
 
 struct mount {
-	struct hlist_node mnt_hash;
+	struct list_head mnt_hash;
 	struct mount *mnt_parent;
 	struct dentry *mnt_mountpoint;
 	struct vfsmount mnt;

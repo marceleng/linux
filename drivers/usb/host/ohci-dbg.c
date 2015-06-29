@@ -289,7 +289,7 @@ ohci_dump_roothub (
 	}
 }
 
-static void ohci_dump(struct ohci_hcd *controller)
+static void ohci_dump (struct ohci_hcd *controller, int verbose)
 {
 	ohci_dbg (controller, "OHCI controller state\n");
 
@@ -408,7 +408,7 @@ ohci_dump_ed (const struct ohci_hcd *ohci, const char *label,
 }
 
 #else
-static inline void ohci_dump (struct ohci_hcd *controller) {}
+static inline void ohci_dump (struct ohci_hcd *controller, int verbose) {}
 
 #undef OHCI_VERBOSE_DEBUG
 
@@ -531,16 +531,15 @@ show_list (struct ohci_hcd *ohci, char *buf, size_t count, struct ed *ed)
 static ssize_t fill_async_buffer(struct debug_buffer *buf)
 {
 	struct ohci_hcd		*ohci;
-	size_t			temp, size;
+	size_t			temp;
 	unsigned long		flags;
 
 	ohci = buf->ohci;
-	size = PAGE_SIZE;
 
 	/* display control and bulk lists together, for simplicity */
 	spin_lock_irqsave (&ohci->lock, flags);
-	temp = show_list(ohci, buf->page, size, ohci->ed_controltail);
-	temp += show_list(ohci, buf->page + temp, size - temp,
+	temp = show_list(ohci, buf->page, buf->count, ohci->ed_controltail);
+	temp += show_list(ohci, buf->page + temp, buf->count - temp,
 			  ohci->ed_bulktail);
 	spin_unlock_irqrestore (&ohci->lock, flags);
 

@@ -6828,7 +6828,7 @@ static inline int ixgbe_maybe_stop_tx(struct ixgbe_ring *tx_ring, u16 size)
 }
 
 static u16 ixgbe_select_queue(struct net_device *dev, struct sk_buff *skb,
-			      void *accel_priv, select_queue_fallback_t fallback)
+			      void *accel_priv)
 {
 	struct ixgbe_fwd_adapter *fwd_adapter = accel_priv;
 #ifdef IXGBE_FCOE
@@ -6854,7 +6854,7 @@ static u16 ixgbe_select_queue(struct net_device *dev, struct sk_buff *skb,
 		if (adapter->flags & IXGBE_FLAG_FCOE_ENABLED)
 			break;
 	default:
-		return fallback(dev, skb);
+		return __netdev_pick_tx(dev, skb);
 	}
 
 	f = &adapter->ring_feature[RING_F_FCOE];
@@ -6867,7 +6867,7 @@ static u16 ixgbe_select_queue(struct net_device *dev, struct sk_buff *skb,
 
 	return txq + f->offset;
 #else
-	return fallback(dev, skb);
+	return __netdev_pick_tx(dev, skb);
 #endif
 }
 
@@ -7181,10 +7181,10 @@ static struct rtnl_link_stats64 *ixgbe_get_stats64(struct net_device *netdev,
 
 		if (ring) {
 			do {
-				start = u64_stats_fetch_begin_irq(&ring->syncp);
+				start = u64_stats_fetch_begin_bh(&ring->syncp);
 				packets = ring->stats.packets;
 				bytes   = ring->stats.bytes;
-			} while (u64_stats_fetch_retry_irq(&ring->syncp, start));
+			} while (u64_stats_fetch_retry_bh(&ring->syncp, start));
 			stats->rx_packets += packets;
 			stats->rx_bytes   += bytes;
 		}
@@ -7197,10 +7197,10 @@ static struct rtnl_link_stats64 *ixgbe_get_stats64(struct net_device *netdev,
 
 		if (ring) {
 			do {
-				start = u64_stats_fetch_begin_irq(&ring->syncp);
+				start = u64_stats_fetch_begin_bh(&ring->syncp);
 				packets = ring->stats.packets;
 				bytes   = ring->stats.bytes;
-			} while (u64_stats_fetch_retry_irq(&ring->syncp, start));
+			} while (u64_stats_fetch_retry_bh(&ring->syncp, start));
 			stats->tx_packets += packets;
 			stats->tx_bytes   += bytes;
 		}

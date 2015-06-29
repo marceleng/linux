@@ -94,7 +94,7 @@ static void acpi_gpio_evt_dh(acpi_handle handle, void *data)
  * gpio pins have acpi event methods and assigns interrupt handlers that calls
  * the acpi event methods for those pins.
  */
-static void acpi_gpiochip_request_interrupts(struct gpio_chip *chip)
+void acpi_gpiochip_request_interrupts(struct gpio_chip *chip)
 {
 	struct acpi_buffer buf = {ACPI_ALLOCATE_BUFFER, NULL};
 	struct acpi_resource *res;
@@ -192,6 +192,7 @@ static void acpi_gpiochip_request_interrupts(struct gpio_chip *chip)
 				irq);
 	}
 }
+EXPORT_SYMBOL(acpi_gpiochip_request_interrupts);
 
 /**
  * acpi_gpiochip_free_interrupts() - Free GPIO _EVT ACPI event interrupts.
@@ -202,7 +203,7 @@ static void acpi_gpiochip_request_interrupts(struct gpio_chip *chip)
  * The remaining ACPI event interrupts associated with the chip are freed
  * automatically.
  */
-static void acpi_gpiochip_free_interrupts(struct gpio_chip *chip)
+void acpi_gpiochip_free_interrupts(struct gpio_chip *chip)
 {
 	acpi_handle handle;
 	acpi_status status;
@@ -229,6 +230,7 @@ static void acpi_gpiochip_free_interrupts(struct gpio_chip *chip)
 	acpi_detach_data(handle, acpi_gpio_evt_dh);
 	kfree(evt_pins);
 }
+EXPORT_SYMBOL(acpi_gpiochip_free_interrupts);
 
 struct acpi_gpio_lookup {
 	struct acpi_gpio_info info;
@@ -308,13 +310,3 @@ struct gpio_desc *acpi_get_gpiod_by_index(struct device *dev, int index,
 	return lookup.desc ? lookup.desc : ERR_PTR(-ENODEV);
 }
 EXPORT_SYMBOL_GPL(acpi_get_gpiod_by_index);
-
-void acpi_gpiochip_add(struct gpio_chip *chip)
-{
-	acpi_gpiochip_request_interrupts(chip);
-}
-
-void acpi_gpiochip_remove(struct gpio_chip *chip)
-{
-	acpi_gpiochip_free_interrupts(chip);
-}

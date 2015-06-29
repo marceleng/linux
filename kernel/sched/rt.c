@@ -845,7 +845,7 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 
 			if (!once) {
 				once = true;
-				printk_deferred("sched: RT throttling activated\n");
+				printk_sched("sched: RT throttling activated\n");
 			}
 		} else {
 			/*
@@ -1421,7 +1421,7 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 	/* If this is the first process increment the pointer */
 	if(p && sysctl_sched_ordered_proc_number && (p->pid==sysctl_sched_ordered_proc[0])) {
 		rt_rq->pos_in_list=1;
-	}̈́
+	}
 	/* Otherwise reset the pointer */
 	else if (sysctl_sched_ordered_proc_number){
 		rt_rq->pos_in_list=0;

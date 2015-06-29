@@ -56,7 +56,7 @@ int iptunnel_xmit(struct rtable *rt, struct sk_buff *skb,
 
 	skb_scrub_packet(skb, xnet);
 
-	skb_clear_hash(skb);
+	skb->rxhash = 0;
 	skb_dst_set(skb, &rt->dst);
 	memset(IPCB(skb), 0, sizeof(*IPCB(skb)));
 
@@ -74,7 +74,7 @@ int iptunnel_xmit(struct rtable *rt, struct sk_buff *skb,
 	iph->daddr	=	dst;
 	iph->saddr	=	src;
 	iph->ttl	=	ttl;
-	__ip_select_ident(iph, skb_shinfo(skb)->gso_segs ?: 1);
+	__ip_select_ident(iph, &rt->dst, (skb_shinfo(skb)->gso_segs ?: 1) - 1);
 
 	err = ip_local_out(skb);
 	if (unlikely(net_xmit_eval(err)))
@@ -91,12 +91,11 @@ int iptunnel_pull_header(struct sk_buff *skb, int hdr_len, __be16 inner_proto)
 	skb_pull_rcsum(skb, hdr_len);
 
 	if (inner_proto == htons(ETH_P_TEB)) {
-		struct ethhdr *eh;
+		struct ethhdr *eh = (struct ethhdr *)skb->data;
 
 		if (unlikely(!pskb_may_pull(skb, ETH_HLEN)))
 			return -ENOMEM;
 
-		eh = (struct ethhdr *)skb->data;
 		if (likely(ntohs(eh->h_proto) >= ETH_P_802_3_MIN))
 			skb->protocol = eh->h_proto;
 		else
@@ -108,8 +107,8 @@ int iptunnel_pull_header(struct sk_buff *skb, int hdr_len, __be16 inner_proto)
 
 	nf_reset(skb);
 	secpath_reset(skb);
-	skb_clear_hash_if_not_l4(skb);
-	skb_dst_drop(skb);
+	if (!skb->l4_rxhash)
+		skb->rxhash = 0;
 	skb->vlan_tci = 0;
 	skb_set_queue_mapping(skb, 0);
 	skb->pkt_type = PACKET_HOST;
@@ -149,4 +148,3 @@ error:
 	return ERR_PTR(err);
 }
 EXPORT_SYMBOL_GPL(iptunnel_handle_offloads);
-

@@ -250,7 +250,7 @@ static int ioda_eeh_get_state(struct eeh_pe *pe)
 {
 	s64 ret = 0;
 	u8 fstate;
-	__be16 pcierr;
+	u16 pcierr;
 	u32 pe_no;
 	int result;
 	struct pci_controller *hose = pe->phb;
@@ -284,7 +284,7 @@ static int ioda_eeh_get_state(struct eeh_pe *pe)
 		result = 0;
 		result &= ~EEH_STATE_RESET_ACTIVE;
 
-		if (be16_to_cpu(pcierr) != OPAL_EEH_PHB_ERROR) {
+		if (pcierr != OPAL_EEH_PHB_ERROR) {
 			result |= EEH_STATE_MMIO_ACTIVE;
 			result |= EEH_STATE_DMA_ACTIVE;
 			result |= EEH_STATE_MMIO_ENABLED;
@@ -549,8 +549,7 @@ static int ioda_eeh_reset(struct eeh_pe *pe, int option)
 		ret = ioda_eeh_phb_reset(hose, option);
 	} else {
 		bus = eeh_pe_bus_get(pe);
-		if (pci_is_root_bus(bus) ||
-		    pci_is_root_bus(bus->parent))
+		if (pci_is_root_bus(bus))
 			ret = ioda_eeh_root_reset(hose, option);
 		else
 			ret = ioda_eeh_bridge_reset(hose, bus->self, option);
@@ -695,8 +694,8 @@ static int ioda_eeh_next_error(struct eeh_pe **pe)
 {
 	struct pci_controller *hose;
 	struct pnv_phb *phb;
-	__be64 frozen_pe_no;
-	__be16 err_type, severity;
+	u64 frozen_pe_no;
+	u16 err_type, severity;
 	long rc;
 	int ret = EEH_NEXT_ERR_NONE;
 
@@ -729,8 +728,8 @@ static int ioda_eeh_next_error(struct eeh_pe **pe)
 		}
 
 		/* If the PHB doesn't have error, stop processing */
-		if (be16_to_cpu(err_type) == OPAL_EEH_NO_ERROR ||
-		    be16_to_cpu(severity) == OPAL_EEH_SEV_NO_ERROR) {
+		if (err_type == OPAL_EEH_NO_ERROR ||
+		    severity == OPAL_EEH_SEV_NO_ERROR) {
 			pr_devel("%s: No error found on PHB#%x\n",
 				 __func__, hose->global_number);
 			continue;
@@ -742,11 +741,11 @@ static int ioda_eeh_next_error(struct eeh_pe **pe)
 		 * specific PHB.
 		 */
 		pr_devel("%s: Error (%d, %d, %llu) on PHB#%x\n",
-			 __func__, be16_to_cpu(err_type), be16_to_cpu(severity),
-			 be64_to_cpu(frozen_pe_no), hose->global_number);
-		switch (be16_to_cpu(err_type)) {
+			 __func__, err_type, severity,
+			 frozen_pe_no, hose->global_number);
+		switch (err_type) {
 		case OPAL_EEH_IOC_ERROR:
-			if (be16_to_cpu(severity) == OPAL_EEH_SEV_IOC_DEAD) {
+			if (severity == OPAL_EEH_SEV_IOC_DEAD) {
 				list_for_each_entry(hose, &hose_list,
 						    list_node) {
 					phb = hose->private_data;
@@ -755,7 +754,7 @@ static int ioda_eeh_next_error(struct eeh_pe **pe)
 
 				pr_err("EEH: dead IOC detected\n");
 				ret = EEH_NEXT_ERR_DEAD_IOC;
-			} else if (be16_to_cpu(severity) == OPAL_EEH_SEV_INF) {
+			} else if (severity == OPAL_EEH_SEV_INF) {
 				pr_info("EEH: IOC informative error "
 					"detected\n");
 				ioda_eeh_hub_diag(hose);
@@ -764,7 +763,7 @@ static int ioda_eeh_next_error(struct eeh_pe **pe)
 
 			break;
 		case OPAL_EEH_PHB_ERROR:
-			if (be16_to_cpu(severity) == OPAL_EEH_SEV_PHB_DEAD) {
+			if (severity == OPAL_EEH_SEV_PHB_DEAD) {
 				if (ioda_eeh_get_phb_pe(hose, pe))
 					break;
 
@@ -772,15 +771,14 @@ static int ioda_eeh_next_error(struct eeh_pe **pe)
 					hose->global_number);
 				phb->eeh_state |= PNV_EEH_STATE_REMOVED;
 				ret = EEH_NEXT_ERR_DEAD_PHB;
-			} else if (be16_to_cpu(severity) ==
-					OPAL_EEH_SEV_PHB_FENCED) {
+			} else if (severity == OPAL_EEH_SEV_PHB_FENCED) {
 				if (ioda_eeh_get_phb_pe(hose, pe))
 					break;
 
 				pr_err("EEH: fenced PHB#%x detected\n",
 					hose->global_number);
 				ret = EEH_NEXT_ERR_FENCED_PHB;
-			} else if (be16_to_cpu(severity) == OPAL_EEH_SEV_INF) {
+			} else if (severity == OPAL_EEH_SEV_INF) {
 				pr_info("EEH: PHB#%x informative error "
 					"detected\n",
 					hose->global_number);
@@ -790,8 +788,7 @@ static int ioda_eeh_next_error(struct eeh_pe **pe)
 
 			break;
 		case OPAL_EEH_PE_ERROR:
-			if (ioda_eeh_get_pe(hose, be64_to_cpu(frozen_pe_no),
-					    pe))
+			if (ioda_eeh_get_pe(hose, frozen_pe_no, pe))
 				break;
 
 			pr_err("EEH: Frozen PE#%x on PHB#%x detected\n",
@@ -800,7 +797,7 @@ static int ioda_eeh_next_error(struct eeh_pe **pe)
 			break;
 		default:
 			pr_warn("%s: Unexpected error type %d\n",
-				__func__, be16_to_cpu(err_type));
+				__func__, err_type);
 		}
 
 		/*

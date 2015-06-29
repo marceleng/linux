@@ -623,10 +623,8 @@ static void emac_rx(struct net_device *dev)
 		}
 
 		/* Move data from EMAC */
-		if (good_packet) {
-			skb = netdev_alloc_skb(dev, rxlen + 4);
-			if (!skb)
-				continue;
+		skb = dev_alloc_skb(rxlen + 4);
+		if (good_packet && skb) {
 			skb_reserve(skb, 2);
 			rdptr = (u8 *) skb_put(skb, rxlen - 4);
 
@@ -728,7 +726,6 @@ static int emac_open(struct net_device *dev)
 
 	ret = emac_mdio_probe(dev);
 	if (ret < 0) {
-		free_irq(dev->irq, dev);
 		netdev_err(dev, "cannot probe MDIO bus\n");
 		return ret;
 	}

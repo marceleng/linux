@@ -58,6 +58,7 @@ unsigned int tipc_k_signal(Handler routine, unsigned long argument)
 
 	spin_lock_bh(&qitem_lock);
 	if (!handler_enabled) {
+		pr_err("Signal request ignored by handler\n");
 		spin_unlock_bh(&qitem_lock);
 		return -ENOPROTOOPT;
 	}

@@ -67,8 +67,6 @@ enum {
 	MLX4_CMD_MAP_ICM_AUX	 = 0xffc,
 	MLX4_CMD_UNMAP_ICM_AUX	 = 0xffb,
 	MLX4_CMD_SET_ICM_SIZE	 = 0xffd,
-	MLX4_CMD_ACCESS_REG	 = 0x3b,
-
 	/*master notify fw on finish for slave's flr*/
 	MLX4_CMD_INFORM_FLR_DONE = 0x5b,
 	MLX4_CMD_GET_OP_REQ      = 0x59,
@@ -127,7 +125,6 @@ enum {
 	/* miscellaneous commands */
 	MLX4_CMD_DIAG_RPRT	 = 0x30,
 	MLX4_CMD_NOP		 = 0x31,
-	MLX4_CMD_CONFIG_DEV	 = 0x3a,
 	MLX4_CMD_ACCESS_MEM	 = 0x2e,
 	MLX4_CMD_SET_VEP	 = 0x52,
 
@@ -160,13 +157,12 @@ enum {
 	/* register/delete flow steering network rules */
 	MLX4_QP_FLOW_STEERING_ATTACH = 0x65,
 	MLX4_QP_FLOW_STEERING_DETACH = 0x66,
-	MLX4_FLOW_STEERING_IB_UC_QP_RANGE = 0x64,
 };
 
 enum {
-	MLX4_CMD_TIME_CLASS_A	= 60000,
-	MLX4_CMD_TIME_CLASS_B	= 60000,
-	MLX4_CMD_TIME_CLASS_C	= 60000,
+	MLX4_CMD_TIME_CLASS_A	= 10000,
+	MLX4_CMD_TIME_CLASS_B	= 10000,
+	MLX4_CMD_TIME_CLASS_C	= 10000,
 };
 
 enum {
@@ -184,7 +180,6 @@ enum {
 	MLX4_SET_PORT_GID_TABLE = 0x5,
 	MLX4_SET_PORT_PRIO2TC	= 0x8,
 	MLX4_SET_PORT_SCHEDULER = 0x9,
-	MLX4_SET_PORT_VXLAN	= 0xB
 };
 
 enum {
@@ -243,13 +238,6 @@ int mlx4_set_vf_vlan(struct mlx4_dev *dev, int port, int vf, u16 vlan, u8 qos);
 int mlx4_set_vf_spoofchk(struct mlx4_dev *dev, int port, int vf, bool setting);
 int mlx4_get_vf_config(struct mlx4_dev *dev, int port, int vf, struct ifla_vf_info *ivf);
 int mlx4_set_vf_link_state(struct mlx4_dev *dev, int port, int vf, int link_state);
-/*
- * mlx4_get_slave_default_vlan -
- * return true if VST ( default vlan)
- * if VST, will return vlan & qos (if not NULL)
- */
-bool mlx4_get_slave_default_vlan(struct mlx4_dev *dev, int port, int slave,
-				 u16 *vlan, u8 *qos);
 
 #define MLX4_COMM_GET_IF_REV(cmd_chan_ver) (u8)((cmd_chan_ver) >> 8)
 

@@ -174,9 +174,6 @@ static struct page *balloon_next_page(struct page *page)
 
 static enum bp_state update_schedule(enum bp_state state)
 {
-	if (state == BP_ECANCELED)
-		return BP_ECANCELED;
-
 	if (state == BP_DONE) {
 		balloon_stats.schedule_delay = 1;
 		balloon_stats.retry_count = 1;
@@ -240,8 +237,8 @@ static enum bp_state reserve_additional_memory(long credit)
 	rc = add_memory(nid, hotplug_start_paddr, balloon_hotplug << PAGE_SHIFT);
 
 	if (rc) {
-		pr_warn("Cannot add additional memory (%i)\n", rc);
-		return BP_ECANCELED;
+		pr_info("%s: add_memory() failed: %i\n", __func__, rc);
+		return BP_EAGAIN;
 	}
 
 	balloon_hotplug -= credit;
@@ -409,25 +406,11 @@ static enum bp_state decrease_reservation(unsigned long nr_pages, gfp_t gfp)
 			state = BP_EAGAIN;
 			break;
 		}
-		scrub_page(page);
 
-		frame_list[i] = page_to_pfn(page);
-	}
-
-	/*
-	 * Ensure that ballooned highmem pages don't have kmaps.
-	 *
-	 * Do this before changing the p2m as kmap_flush_unused()
-	 * reads PTEs to obtain pages (and hence needs the original
-	 * p2m entry).
-	 */
-	kmap_flush_unused();
-
-	/* Update direct mapping, invalidate P2M, and add to balloon. */
-	for (i = 0; i < nr_pages; i++) {
-		pfn = frame_list[i];
+		pfn = page_to_pfn(page);
 		frame_list[i] = pfn_to_mfn(pfn);
-		page = pfn_to_page(pfn);
+
+		scrub_page(page);
 
 #ifdef CONFIG_XEN_HAVE_PVMMU
 		/*
@@ -436,24 +419,28 @@ static enum bp_state decrease_reservation(unsigned long nr_pages, gfp_t gfp)
 		 * p2m are consistent.
 		 */
 		if (!xen_feature(XENFEAT_auto_translated_physmap)) {
-			if (!PageHighMem(page)) {
-				struct page *scratch_page = get_balloon_scratch_page();
+			unsigned long p;
+			struct page   *scratch_page = get_balloon_scratch_page();
 
+			if (!PageHighMem(page)) {
 				ret = HYPERVISOR_update_va_mapping(
 						(unsigned long)__va(pfn << PAGE_SHIFT),
 						pfn_pte(page_to_pfn(scratch_page),
 							PAGE_KERNEL_RO), 0);
 				BUG_ON(ret);
-
-				put_balloon_scratch_page();
 			}
-			__set_phys_to_machine(pfn, INVALID_P2M_ENTRY);
+			p = page_to_pfn(scratch_page);
+			__set_phys_to_machine(pfn, pfn_to_mfn(p));
+
+			put_balloon_scratch_page();
 		}
 #endif
 
-		balloon_append(page);
+		balloon_append(pfn_to_page(pfn));
 	}
 
+	/* Ensure that ballooned highmem pages don't have kmaps. */
+	kmap_flush_unused();
 	flush_tlb_all();
 
 	set_xen_guest_handle(reservation.extent_start, frame_list);

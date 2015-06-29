@@ -1011,7 +1011,7 @@ out:
 static int cluster_pages_for_defrag(struct inode *inode,
 				    struct page **pages,
 				    unsigned long start_index,
-				    unsigned long num_pages)
+				    int num_pages)
 {
 	unsigned long file_end;
 	u64 isize = i_size_read(inode);
@@ -1169,8 +1169,8 @@ int btrfs_defrag_file(struct inode *inode, struct file *file,
 	int defrag_count = 0;
 	int compress_type = BTRFS_COMPRESS_ZLIB;
 	int extent_thresh = range->extent_thresh;
-	unsigned long max_cluster = (256 * 1024) >> PAGE_CACHE_SHIFT;
-	unsigned long cluster = max_cluster;
+	int max_cluster = (256 * 1024) >> PAGE_CACHE_SHIFT;
+	int cluster = max_cluster;
 	u64 new_align = ~((u64)128 * 1024 - 1);
 	struct page **pages = NULL;
 
@@ -1378,7 +1378,6 @@ static noinline int btrfs_ioctl_resize(struct file *file,
 	struct btrfs_trans_handle *trans;
 	struct btrfs_device *device = NULL;
 	char *sizestr;
-	char *retptr;
 	char *devstr = NULL;
 	int ret = 0;
 	int mod = 0;
@@ -1446,8 +1445,8 @@ static noinline int btrfs_ioctl_resize(struct file *file,
 			mod = 1;
 			sizestr++;
 		}
-		new_size = memparse(sizestr, &retptr);
-		if (*retptr != '\0' || new_size == 0) {
+		new_size = memparse(sizestr, NULL);
+		if (new_size == 0) {
 			ret = -EINVAL;
 			goto out_free;
 		}
@@ -2663,9 +2662,6 @@ static int btrfs_extent_same(struct inode *src, u64 loff, u64 len,
 	if (src == dst)
 		return -EINVAL;
 
-	if (len == 0)
-		return 0;
-
 	btrfs_double_lock(src, loff, dst, dst_loff, len);
 
 	ret = extent_same_check_offsets(src, loff, len);
@@ -3045,9 +3041,8 @@ static int btrfs_clone(struct inode *src, struct inode *inode,
 							 new_key.offset + datal,
 							 1);
 				if (ret) {
-					if (ret != -EINVAL)
-						btrfs_abort_transaction(trans,
-								root, ret);
+					btrfs_abort_transaction(trans, root,
+								ret);
 					btrfs_end_transaction(trans, root);
 					goto out;
 				}
@@ -3132,9 +3127,8 @@ static noinline long btrfs_ioctl_clone(struct file *file, unsigned long srcfd,
 	 *   decompress into destination's address_space (the file offset
 	 *   may change, so source mapping won't do), then recompress (or
 	 *   otherwise reinsert) a subrange.
-	 *
-	 * - split destination inode's inline extents.  The inline extents can
-	 *   be either compressed or non-compressed.
+	 * - allow ranges within the same file to be cloned (provided
+	 *   they don't overlap)?
 	 */
 
 	/* the destination must be opened for writing */
@@ -3202,11 +3196,6 @@ static noinline long btrfs_ioctl_clone(struct file *file, unsigned long srcfd,
 	/* if we extend to eof, continue to block boundary */
 	if (off + len == src->i_size)
 		len = ALIGN(src->i_size, bs) - off;
-
-	if (len == 0) {
-		ret = 0;
-		goto out_unlock;
-	}
 
 	/* verify the end result is block aligned */
 	if (!IS_ALIGNED(off, bs) || !IS_ALIGNED(off + len, bs) ||

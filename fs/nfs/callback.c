@@ -135,7 +135,6 @@ nfs41_callback_svc(void *vrqstp)
 					struct rpc_rqst, rq_bc_list);
 			list_del(&req->rq_bc_list);
 			spin_unlock_bh(&serv->sv_cb_lock);
-			finish_wait(&serv->sv_cb_waitq, &wq);
 			dprintk("Invoking bc_svc_process()\n");
 			error = bc_svc_process(serv, req, rqstp);
 			dprintk("bc_svc_process() returned w/ error code= %d\n",
@@ -143,9 +142,8 @@ nfs41_callback_svc(void *vrqstp)
 		} else {
 			spin_unlock_bh(&serv->sv_cb_lock);
 			schedule();
-			finish_wait(&serv->sv_cb_waitq, &wq);
 		}
-		flush_signals(current);
+		finish_wait(&serv->sv_cb_waitq, &wq);
 	}
 	return 0;
 }

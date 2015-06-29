@@ -182,13 +182,11 @@ static void edma_execute(struct edma_chan *echan)
 				  echan->ecc->dummy_slot);
 	}
 
+	edma_resume(echan->ch_num);
+
 	if (edesc->processed <= MAX_NR_SG) {
 		dev_dbg(dev, "first transfer starting %d\n", echan->ch_num);
 		edma_start(echan->ch_num);
-	} else {
-		dev_dbg(dev, "chan: %d: completed %d elements, resuming\n",
-			echan->ch_num, edesc->processed);
-		edma_resume(echan->ch_num);
 	}
 
 	/*
@@ -219,12 +217,6 @@ static int edma_terminate_all(struct edma_chan *echan)
 	 * echan->edesc is NULL and exit.)
 	 */
 	if (echan->edesc) {
-		/*
-		 * free the running request descriptor
-		 * since it is not in any of the vdesc lists
-		 */
-		edma_desc_free(&echan->edesc->vdesc);
-
 		echan->edesc = NULL;
 		edma_stop(echan->ch_num);
 	}

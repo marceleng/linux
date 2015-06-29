@@ -17,7 +17,6 @@
 #include <linux/idr.h>
 #include <linux/fs.h>
 
-#include <net/ipv6.h>
 #include <net/net_namespace.h>
 #include <net/rtnetlink.h>
 #include <net/sock.h>
@@ -109,15 +108,17 @@ out:
 	return err;
 }
 
-/* Requires RTNL */
 static int macvtap_set_queue(struct net_device *dev, struct file *file,
 			     struct macvtap_queue *q)
 {
 	struct macvlan_dev *vlan = netdev_priv(dev);
+	int err = -EBUSY;
 
+	rtnl_lock();
 	if (vlan->numqueues == MAX_MACVTAP_QUEUES)
-		return -EBUSY;
+		goto out;
 
+	err = 0;
 	rcu_assign_pointer(q->vlan, vlan);
 	rcu_assign_pointer(vlan->taps[vlan->numvtaps], q);
 	sock_hold(&q->sk);
@@ -131,7 +132,9 @@ static int macvtap_set_queue(struct net_device *dev, struct file *file,
 	vlan->numvtaps++;
 	vlan->numqueues++;
 
-	return 0;
+out:
+	rtnl_unlock();
+	return err;
 }
 
 static int macvtap_disable_queue(struct macvtap_queue *q)
@@ -216,7 +219,7 @@ static struct macvtap_queue *macvtap_get_queue(struct net_device *dev,
 		goto out;
 
 	/* Check if we can use flow to select a queue */
-	rxq = skb_get_hash(skb);
+	rxq = skb_get_rxhash(skb);
 	if (rxq) {
 		tap = rcu_dereference(vlan->taps[rxq % numvtaps]);
 		goto out;
@@ -312,15 +315,6 @@ static int macvtap_forward(struct net_device *dev, struct sk_buff *skb)
 			segs = nskb;
 		}
 	} else {
-		/* If we receive a partial checksum and the tap side
-		 * doesn't support checksum offload, compute the checksum.
-		 * Note: it doesn't matter which checksum feature to
-		 *        check, we either support them all or none.
-		 */
-		if (skb->ip_summed == CHECKSUM_PARTIAL &&
-		    !(features & NETIF_F_ALL_CSUM) &&
-		    skb_checksum_help(skb))
-			goto drop;
 		skb_queue_tail(&q->sk.sk_receive_queue, skb);
 	}
 
@@ -447,12 +441,11 @@ static void macvtap_sock_destruct(struct sock *sk)
 static int macvtap_open(struct inode *inode, struct file *file)
 {
 	struct net *net = current->nsproxy->net_ns;
-	struct net_device *dev;
+	struct net_device *dev = dev_get_by_macvtap_minor(iminor(inode));
 	struct macvtap_queue *q;
-	int err = -ENODEV;
+	int err;
 
-	rtnl_lock();
-	dev = dev_get_by_macvtap_minor(iminor(inode));
+	err = -ENODEV;
 	if (!dev)
 		goto out;
 
@@ -492,7 +485,6 @@ out:
 	if (dev)
 		dev_put(dev);
 
-	rtnl_unlock();
 	return err;
 }
 
@@ -567,8 +559,6 @@ static int macvtap_skb_from_vnet_hdr(struct sk_buff *skb,
 			break;
 		case VIRTIO_NET_HDR_GSO_UDP:
 			gso_type = SKB_GSO_UDP;
-			if (skb->protocol == htons(ETH_P_IPV6))
-				ipv6_proxy_select_ident(skb);
 			break;
 		default:
 			return -EINVAL;
@@ -625,8 +615,6 @@ static int macvtap_skb_to_vnet_hdr(const struct sk_buff *skb,
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
 		vnet_hdr->flags = VIRTIO_NET_HDR_F_NEEDS_CSUM;
 		vnet_hdr->csum_start = skb_checksum_start_offset(skb);
-		if (vlan_tx_tag_present(skb))
-			vnet_hdr->csum_start += VLAN_HLEN;
 		vnet_hdr->csum_offset = skb->csum_offset;
 	} else if (skb->ip_summed == CHECKSUM_UNNECESSARY) {
 		vnet_hdr->flags = VIRTIO_NET_HDR_F_DATA_VALID;
@@ -635,15 +623,12 @@ static int macvtap_skb_to_vnet_hdr(const struct sk_buff *skb,
 	return 0;
 }
 
-/* Neighbour code has some assumptions on HH_DATA_MOD alignment */
-#define MACVTAP_RESERVE HH_DATA_OFF(ETH_HLEN)
-
 /* Get packet from user space buffer */
 static ssize_t macvtap_get_user(struct macvtap_queue *q, struct msghdr *m,
 				const struct iovec *iv, unsigned long total_len,
 				size_t count, int noblock)
 {
-	int good_linear = SKB_MAX_HEAD(MACVTAP_RESERVE);
+	int good_linear = SKB_MAX_HEAD(NET_IP_ALIGN);
 	struct sk_buff *skb;
 	struct macvlan_dev *vlan;
 	unsigned long len = total_len;
@@ -702,7 +687,7 @@ static ssize_t macvtap_get_user(struct macvtap_queue *q, struct msghdr *m,
 			linear = vnet_hdr.hdr_len;
 	}
 
-	skb = macvtap_alloc_skb(&q->sk, MACVTAP_RESERVE, copylen,
+	skb = macvtap_alloc_skb(&q->sk, NET_IP_ALIGN, copylen,
 				linear, noblock, &err);
 	if (!skb)
 		goto err;

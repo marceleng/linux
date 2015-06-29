@@ -194,6 +194,7 @@ static int rtl_op_add_interface(struct ieee80211_hw *hw,
 					rtlpriv->cfg->maps
 					[RTL_IBSS_INT_MASKS]);
 		}
+		mac->link_state = MAC80211_LINKED;
 		break;
 	case NL80211_IFTYPE_ADHOC:
 		RT_TRACE(rtlpriv, COMP_MAC80211, DBG_LOUD,
@@ -737,11 +738,6 @@ static void rtl_op_bss_info_changed(struct ieee80211_hw *hw,
 				rtlpriv->cfg->ops->linked_set_reg(hw);
 			rcu_read_lock();
 			sta = ieee80211_find_sta(vif, (u8 *)bss_conf->bssid);
-			if (!sta) {
-				pr_err("ieee80211_find_sta returned NULL\n");
-				rcu_read_unlock();
-				goto out;
-			}
 
 			if (vif->type == NL80211_IFTYPE_STATION && sta)
 				rtlpriv->cfg->ops->update_rate_tbl(hw, sta, 0);
@@ -896,7 +892,7 @@ static void rtl_op_bss_info_changed(struct ieee80211_hw *hw,
 
 			mac->basic_rates = basic_rates;
 			rtlpriv->cfg->ops->set_hw_reg(hw, HW_VAR_BASIC_RATE,
-					(u8 *)(&basic_rates));
+					(u8 *) (&basic_rates));
 		}
 		rcu_read_unlock();
 	}
@@ -910,11 +906,6 @@ static void rtl_op_bss_info_changed(struct ieee80211_hw *hw,
 		if (bss_conf->assoc) {
 			if (ppsc->fwctrl_lps) {
 				u8 mstatus = RT_MEDIA_CONNECT;
-				u8 keep_alive = 10;
-				rtlpriv->cfg->ops->set_hw_reg(hw,
-						 HW_VAR_KEEP_ALIVE,
-						 (u8 *)(&keep_alive));
-
 				rtlpriv->cfg->ops->set_hw_reg(hw,
 						      HW_VAR_H2C_FW_JOINBSSRPT,
 						      &mstatus);
@@ -1318,8 +1309,7 @@ static void rtl_op_rfkill_poll(struct ieee80211_hw *hw)
  * before switch channel or power save, or tx buffer packet
  * maybe send after offchannel or rf sleep, this may cause
  * dis-association by AP */
-static void rtl_op_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-			 u32 queues, bool drop)
+static void rtl_op_flush(struct ieee80211_hw *hw, u32 queues, bool drop)
 {
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 

@@ -17,7 +17,6 @@
  *      as published by the Free Software Foundation; either version
  *      2 of the License, or (at your option) any later version.
  */
-#include <linux/console.h>
 #include <linux/ctype.h>
 #include <linux/cpu.h>
 #include <linux/module.h>
@@ -35,7 +34,6 @@ EXPORT_SYMBOL(of_allnodes);
 struct device_node *of_chosen;
 struct device_node *of_aliases;
 static struct device_node *of_stdout;
-static const char *of_stdout_options;
 
 DEFINE_MUTEX(of_aliases_mutex);
 
@@ -344,72 +342,27 @@ struct device_node *of_get_cpu_node(int cpu, unsigned int *thread)
 }
 EXPORT_SYMBOL(of_get_cpu_node);
 
-/**
- * __of_device_is_compatible() - Check if the node matches given constraints
- * @device: pointer to node
- * @compat: required compatible string, NULL or "" for any match
- * @type: required device_type value, NULL or "" for any match
- * @name: required node name, NULL or "" for any match
- *
- * Checks if the given @compat, @type and @name strings match the
- * properties of the given @device. A constraints can be skipped by
- * passing NULL or an empty string as the constraint.
- *
- * Returns 0 for no match, and a positive integer on match. The return
- * value is a relative score with larger values indicating better
- * matches. The score is weighted for the most specific compatible value
- * to get the highest score. Matching type is next, followed by matching
- * name. Practically speaking, this results in the following priority
- * order for matches:
- *
- * 1. specific compatible && type && name
- * 2. specific compatible && type
- * 3. specific compatible && name
- * 4. specific compatible
- * 5. general compatible && type && name
- * 6. general compatible && type
- * 7. general compatible && name
- * 8. general compatible
- * 9. type && name
- * 10. type
- * 11. name
+/** Checks if the given "compat" string matches one of the strings in
+ * the device's "compatible" property
  */
 static int __of_device_is_compatible(const struct device_node *device,
-				     const char *compat, const char *type, const char *name)
+				     const char *compat)
 {
-	struct property *prop;
-	const char *cp;
-	int index = 0, score = 0;
+	const char* cp;
+	int cplen, l;
 
-	/* Compatible match has highest priority */
-	if (compat && compat[0]) {
-		prop = __of_find_property(device, "compatible", NULL);
-		for (cp = of_prop_next_string(prop, NULL); cp;
-		     cp = of_prop_next_string(prop, cp), index++) {
-			if (of_compat_cmp(cp, compat, strlen(compat)) == 0) {
-				score = INT_MAX/2 - (index << 2);
-				break;
-			}
-		}
-		if (!score)
-			return 0;
+	cp = __of_get_property(device, "compatible", &cplen);
+	if (cp == NULL)
+		return 0;
+	while (cplen > 0) {
+		if (of_compat_cmp(cp, compat, strlen(compat)) == 0)
+			return 1;
+		l = strlen(cp) + 1;
+		cp += l;
+		cplen -= l;
 	}
 
-	/* Matching type is better than matching name */
-	if (type && type[0]) {
-		if (!device->type || of_node_cmp(type, device->type))
-			return 0;
-		score += 2;
-	}
-
-	/* Matching name is a bit better than not */
-	if (name && name[0]) {
-		if (!device->name || of_node_cmp(name, device->name))
-			return 0;
-		score++;
-	}
-
-	return score;
+	return 0;
 }
 
 /** Checks if the given "compat" string matches one of the strings in
@@ -422,7 +375,7 @@ int of_device_is_compatible(const struct device_node *device,
 	int res;
 
 	raw_spin_lock_irqsave(&devtree_lock, flags);
-	res = __of_device_is_compatible(device, compat, NULL, NULL);
+	res = __of_device_is_compatible(device, compat);
 	raw_spin_unlock_irqrestore(&devtree_lock, flags);
 	return res;
 }
@@ -544,22 +497,6 @@ struct device_node *of_get_next_parent(struct device_node *node)
 }
 EXPORT_SYMBOL(of_get_next_parent);
 
-static struct device_node *__of_get_next_child(const struct device_node *node,
-						struct device_node *prev)
-{
-	struct device_node *next;
-
-	next = prev ? prev->sibling : node->child;
-	for (; next; next = next->sibling)
-		if (of_node_get(next))
-			break;
-	of_node_put(prev);
-	return next;
-}
-#define __for_each_child_of_node(parent, child) \
-	for (child = __of_get_next_child(parent, NULL); child != NULL; \
-	     child = __of_get_next_child(parent, child))
-
 /**
  *	of_get_next_child - Iterate a node childs
  *	@node:	parent node
@@ -575,7 +512,11 @@ struct device_node *of_get_next_child(const struct device_node *node,
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&devtree_lock, flags);
-	next = __of_get_next_child(node, prev);
+	next = prev ? prev->sibling : node->child;
+	for (; next; next = next->sibling)
+		if (of_node_get(next))
+			break;
+	of_node_put(prev);
 	raw_spin_unlock_irqrestore(&devtree_lock, flags);
 	return next;
 }
@@ -632,95 +573,28 @@ struct device_node *of_get_child_by_name(const struct device_node *node,
 }
 EXPORT_SYMBOL(of_get_child_by_name);
 
-static struct device_node *__of_find_node_by_path(struct device_node *parent,
-						const char *path)
-{
-	struct device_node *child;
-	int len = strchrnul(path, '/') - path;
-	int term;
-
-	if (!len)
-		return NULL;
-
-	term = strchrnul(path, ':') - path;
-	if (term < len)
-		len = term;
-
-	__for_each_child_of_node(parent, child) {
-		const char *name = strrchr(child->full_name, '/');
-		if (WARN(!name, "malformed device_node %s\n", child->full_name))
-			continue;
-		name++;
-		if (strncmp(path, name, len) == 0 && (strlen(name) == len))
-			return child;
-	}
-	return NULL;
-}
-
 /**
- *	of_find_node_opts_by_path - Find a node matching a full OF path
- *	@path: Either the full path to match, or if the path does not
- *	       start with '/', the name of a property of the /aliases
- *	       node (an alias).  In the case of an alias, the node
- *	       matching the alias' value will be returned.
- *	@opts: Address of a pointer into which to store the start of
- *	       an options string appended to the end of the path with
- *	       a ':' separator.
- *
- *	Valid paths:
- *		/foo/bar	Full path
- *		foo		Valid alias
- *		foo/bar		Valid alias + relative path
+ *	of_find_node_by_path - Find a node matching a full OF path
+ *	@path:	The full path to match
  *
  *	Returns a node pointer with refcount incremented, use
  *	of_node_put() on it when done.
  */
-struct device_node *of_find_node_opts_by_path(const char *path, const char **opts)
+struct device_node *of_find_node_by_path(const char *path)
 {
-	struct device_node *np = NULL;
-	struct property *pp;
+	struct device_node *np = of_allnodes;
 	unsigned long flags;
-	const char *separator = strchr(path, ':');
 
-	if (opts)
-		*opts = separator ? separator + 1 : NULL;
-
-	if (strcmp(path, "/") == 0)
-		return of_node_get(of_allnodes);
-
-	/* The path could begin with an alias */
-	if (*path != '/') {
-		char *p = strchrnul(path, '/');
-		int len = separator ? separator - path : p - path;
-
-		/* of_aliases must not be NULL */
-		if (!of_aliases)
-			return NULL;
-
-		for_each_property_of_node(of_aliases, pp) {
-			if (strlen(pp->name) == len && !strncmp(pp->name, path, len)) {
-				np = of_find_node_by_path(pp->value);
-				break;
-			}
-		}
-		if (!np)
-			return NULL;
-		path = p;
-	}
-
-	/* Step down the tree matching path components */
 	raw_spin_lock_irqsave(&devtree_lock, flags);
-	if (!np)
-		np = of_node_get(of_allnodes);
-	while (np && *path == '/') {
-		path++; /* Increment past '/' delimiter */
-		np = __of_find_node_by_path(np, path);
-		path = strchrnul(path, '/');
+	for (; np; np = np->allnext) {
+		if (np->full_name && (of_node_cmp(np->full_name, path) == 0)
+		    && of_node_get(np))
+			break;
 	}
 	raw_spin_unlock_irqrestore(&devtree_lock, flags);
 	return np;
 }
-EXPORT_SYMBOL(of_find_node_opts_by_path);
+EXPORT_SYMBOL(of_find_node_by_path);
 
 /**
  *	of_find_node_by_name - Find a node by its "name" property
@@ -804,7 +678,10 @@ struct device_node *of_find_compatible_node(struct device_node *from,
 	raw_spin_lock_irqsave(&devtree_lock, flags);
 	np = from ? from->allnext : of_allnodes;
 	for (; np; np = np->allnext) {
-		if (__of_device_is_compatible(np, compatible, type, NULL) &&
+		if (type
+		    && !(np->type && (of_node_cmp(np->type, type) == 0)))
+			continue;
+		if (__of_device_is_compatible(np, compatible) &&
 		    of_node_get(np))
 			break;
 	}
@@ -854,22 +731,25 @@ static
 const struct of_device_id *__of_match_node(const struct of_device_id *matches,
 					   const struct device_node *node)
 {
-	const struct of_device_id *best_match = NULL;
-	int score, best_score = 0;
-
 	if (!matches)
 		return NULL;
 
-	for (; matches->name[0] || matches->type[0] || matches->compatible[0]; matches++) {
-		score = __of_device_is_compatible(node, matches->compatible,
-						  matches->type, matches->name);
-		if (score > best_score) {
-			best_match = matches;
-			best_score = score;
-		}
+	while (matches->name[0] || matches->type[0] || matches->compatible[0]) {
+		int match = 1;
+		if (matches->name[0])
+			match &= node->name
+				&& !strcmp(matches->name, node->name);
+		if (matches->type[0])
+			match &= node->type
+				&& !strcmp(matches->type, node->type);
+		if (matches->compatible[0])
+			match &= __of_device_is_compatible(node,
+							   matches->compatible);
+		if (match)
+			return matches;
+		matches++;
 	}
-
-	return best_match;
+	return NULL;
 }
 
 /**
@@ -1195,6 +1075,52 @@ int of_property_read_string(struct device_node *np, const char *propname,
 EXPORT_SYMBOL_GPL(of_property_read_string);
 
 /**
+ * of_property_read_string_index - Find and read a string from a multiple
+ * strings property.
+ * @np:		device node from which the property value is to be read.
+ * @propname:	name of the property to be searched.
+ * @index:	index of the string in the list of strings
+ * @out_string:	pointer to null terminated return string, modified only if
+ *		return value is 0.
+ *
+ * Search for a property in a device tree node and retrieve a null
+ * terminated string value (pointer to data, not a copy) in the list of strings
+ * contained in that property.
+ * Returns 0 on success, -EINVAL if the property does not exist, -ENODATA if
+ * property does not have a value, and -EILSEQ if the string is not
+ * null-terminated within the length of the property data.
+ *
+ * The out_string pointer is modified only if a valid string can be decoded.
+ */
+int of_property_read_string_index(struct device_node *np, const char *propname,
+				  int index, const char **output)
+{
+	struct property *prop = of_find_property(np, propname, NULL);
+	int i = 0;
+	size_t l = 0, total = 0;
+	const char *p;
+
+	if (!prop)
+		return -EINVAL;
+	if (!prop->value)
+		return -ENODATA;
+	if (strnlen(prop->value, prop->length) >= prop->length)
+		return -EILSEQ;
+
+	p = prop->value;
+
+	for (i = 0; total < prop->length; total += l, p += l) {
+		l = strlen(p) + 1;
+		if (i++ == index) {
+			*output = p;
+			return 0;
+		}
+	}
+	return -ENODATA;
+}
+EXPORT_SYMBOL_GPL(of_property_read_string_index);
+
+/**
  * of_property_match_string() - Find string in a list and return index
  * @np: pointer to node containing string list property
  * @propname: string list property name
@@ -1220,7 +1146,7 @@ int of_property_match_string(struct device_node *np, const char *propname,
 	end = p + prop->length;
 
 	for (i = 0; p < end; i++, p += l) {
-		l = strnlen(p, end - p) + 1;
+		l = strlen(p) + 1;
 		if (p + l > end)
 			return -EILSEQ;
 		pr_debug("comparing %s with %s\n", string, p);
@@ -1232,41 +1158,39 @@ int of_property_match_string(struct device_node *np, const char *propname,
 EXPORT_SYMBOL_GPL(of_property_match_string);
 
 /**
- * of_property_read_string_util() - Utility helper for parsing string properties
+ * of_property_count_strings - Find and return the number of strings from a
+ * multiple strings property.
  * @np:		device node from which the property value is to be read.
  * @propname:	name of the property to be searched.
- * @out_strs:	output array of string pointers.
- * @sz:		number of array elements to read.
- * @skip:	Number of strings to skip over at beginning of list.
  *
- * Don't call this function directly. It is a utility helper for the
- * of_property_read_string*() family of functions.
+ * Search for a property in a device tree node and retrieve the number of null
+ * terminated string contain in it. Returns the number of strings on
+ * success, -EINVAL if the property does not exist, -ENODATA if property
+ * does not have a value, and -EILSEQ if the string is not null-terminated
+ * within the length of the property data.
  */
-int of_property_read_string_helper(struct device_node *np, const char *propname,
-				   const char **out_strs, size_t sz, int skip)
+int of_property_count_strings(struct device_node *np, const char *propname)
 {
 	struct property *prop = of_find_property(np, propname, NULL);
-	int l = 0, i = 0;
-	const char *p, *end;
+	int i = 0;
+	size_t l = 0, total = 0;
+	const char *p;
 
 	if (!prop)
 		return -EINVAL;
 	if (!prop->value)
 		return -ENODATA;
-	p = prop->value;
-	end = p + prop->length;
+	if (strnlen(prop->value, prop->length) >= prop->length)
+		return -EILSEQ;
 
-	for (i = 0; p < end && (!out_strs || i < skip + sz); i++, p += l) {
-		l = strnlen(p, end - p) + 1;
-		if (p + l > end)
-			return -EILSEQ;
-		if (out_strs && i >= skip)
-			*out_strs++ = p;
-	}
-	i -= skip;
-	return i <= 0 ? -ENODATA : i;
+	p = prop->value;
+
+	for (i = 0; total < prop->length; total += l, p += l, i++)
+		l = strlen(p) + 1;
+
+	return i;
 }
-EXPORT_SYMBOL_GPL(of_property_read_string_helper);
+EXPORT_SYMBOL_GPL(of_property_count_strings);
 
 void of_print_phandle_args(const char *msg, const struct of_phandle_args *args)
 {
@@ -1853,11 +1777,11 @@ void of_alias_scan(void * (*dt_alloc)(u64 size, u64 align))
 		of_chosen = of_find_node_by_path("/chosen@0");
 
 	if (of_chosen) {
-		const char *name = of_get_property(of_chosen, "stdout-path", NULL);
-		if (!name)
-			name = of_get_property(of_chosen, "linux,stdout-path", NULL);
+		const char *name;
+
+		name = of_get_property(of_chosen, "linux,stdout-path", NULL);
 		if (name)
-			of_stdout = of_find_node_opts_by_path(name, &of_stdout_options);
+			of_stdout = of_find_node_by_path(name);
 	}
 
 	of_aliases = of_find_node_by_path("/aliases");
@@ -1971,23 +1895,20 @@ const char *of_prop_next_string(struct property *prop, const char *cur)
 EXPORT_SYMBOL_GPL(of_prop_next_string);
 
 /**
- * of_console_check() - Test and setup console for DT setup
- * @dn - Pointer to device node
- * @name - Name to use for preferred console without index. ex. "ttyS"
- * @index - Index to use for preferred console.
+ * of_device_is_stdout_path - check if a device node matches the
+ *                            linux,stdout-path property
  *
- * Check if the given device node matches the stdout-path property in the
- * /chosen node. If it does then register it as the preferred console and return
- * TRUE. Otherwise return FALSE.
+ * Check if this device node matches the linux,stdout-path property
+ * in the chosen node. return true if yes, false otherwise.
  */
-bool of_console_check(struct device_node *dn, char *name, int index)
+int of_device_is_stdout_path(struct device_node *dn)
 {
-	if (!dn || dn != of_stdout || console_set_on_cmdline)
+	if (!of_stdout)
 		return false;
-	return !add_preferred_console(name, index,
-				      kstrdup(of_stdout_options, GFP_KERNEL));
+
+	return of_stdout == dn;
 }
-EXPORT_SYMBOL_GPL(of_console_check);
+EXPORT_SYMBOL_GPL(of_device_is_stdout_path);
 
 /**
  *	of_find_next_cache_node - Find a node's subsidiary cache

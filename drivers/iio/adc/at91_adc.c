@@ -78,7 +78,6 @@ struct at91_adc_state {
 	bool			done;
 	int			irq;
 	u16			last_value;
-	int			chnb;
 	struct mutex		lock;
 	u8			num_channels;
 	void __iomem		*reg_base;
@@ -152,7 +151,7 @@ void handle_adc_eoc_trigger(int irq, struct iio_dev *idev)
 		disable_irq_nosync(irq);
 		iio_trigger_poll(idev->trig, iio_get_time_ns());
 	} else {
-		st->last_value = at91_adc_readl(st, AT91_ADC_CHAN(st, st->chnb));
+		st->last_value = at91_adc_readl(st, AT91_ADC_LCDR);
 		st->done = true;
 		wake_up_interruptible(&st->wq_data_avail);
 	}
@@ -231,7 +230,7 @@ static irqreturn_t at91_adc_interrupt(int irq, void *private)
 		AT91_ADC_IER_YRDY |
 		AT91_ADC_IER_PRDY;
 
-	if (status & GENMASK(st->num_channels - 1, 0))
+	if (status & st->registers->drdy_mask)
 		handle_adc_eoc_trigger(irq, idev);
 
 	if (status & AT91_ADC_IER_PEN) {
@@ -323,11 +322,12 @@ static int at91_adc_channel_init(struct iio_dev *idev)
 	return idev->num_channels;
 }
 
-static int at91_adc_get_trigger_value_by_name(struct iio_dev *idev,
+static u8 at91_adc_get_trigger_value_by_name(struct iio_dev *idev,
 					     struct at91_adc_trigger *triggers,
 					     const char *trigger_name)
 {
 	struct at91_adc_state *st = iio_priv(idev);
+	u8 value = 0;
 	int i;
 
 	for (i = 0; i < st->trigger_number; i++) {
@@ -340,32 +340,32 @@ static int at91_adc_get_trigger_value_by_name(struct iio_dev *idev,
 			return -ENOMEM;
 
 		if (strcmp(trigger_name, name) == 0) {
+			value = triggers[i].value;
 			kfree(name);
-			if (triggers[i].value == 0)
-				return -EINVAL;
-			return triggers[i].value;
+			break;
 		}
 
 		kfree(name);
 	}
 
-	return -EINVAL;
+	return value;
 }
 
 static int at91_adc_configure_trigger(struct iio_trigger *trig, bool state)
 {
 	struct iio_dev *idev = iio_trigger_get_drvdata(trig);
 	struct at91_adc_state *st = iio_priv(idev);
+	struct iio_buffer *buffer = idev->buffer;
 	struct at91_adc_reg_desc *reg = st->registers;
 	u32 status = at91_adc_readl(st, reg->trigger_register);
-	int value;
+	u8 value;
 	u8 bit;
 
 	value = at91_adc_get_trigger_value_by_name(idev,
 						   st->trigger_list,
 						   idev->trig->name);
-	if (value < 0)
-		return value;
+	if (value == 0)
+		return -EINVAL;
 
 	if (state) {
 		st->buffer = kmalloc(idev->scan_bytes, GFP_KERNEL);
@@ -375,7 +375,7 @@ static int at91_adc_configure_trigger(struct iio_trigger *trig, bool state)
 		at91_adc_writel(st, reg->trigger_register,
 				status | value);
 
-		for_each_set_bit(bit, idev->active_scan_mask,
+		for_each_set_bit(bit, buffer->scan_mask,
 				 st->num_channels) {
 			struct iio_chan_spec const *chan = idev->channels + bit;
 			at91_adc_writel(st, AT91_ADC_CHER,
@@ -390,7 +390,7 @@ static int at91_adc_configure_trigger(struct iio_trigger *trig, bool state)
 		at91_adc_writel(st, reg->trigger_register,
 				status & ~value);
 
-		for_each_set_bit(bit, idev->active_scan_mask,
+		for_each_set_bit(bit, buffer->scan_mask,
 				 st->num_channels) {
 			struct iio_chan_spec const *chan = idev->channels + bit;
 			at91_adc_writel(st, AT91_ADC_CHDR,
@@ -501,10 +501,9 @@ static int at91_adc_read_raw(struct iio_dev *idev,
 	case IIO_CHAN_INFO_RAW:
 		mutex_lock(&st->lock);
 
-		st->chnb = chan->channel;
 		at91_adc_writel(st, AT91_ADC_CHER,
 				AT91_ADC_CH(chan->channel));
-		at91_adc_writel(st, AT91_ADC_IER, BIT(chan->channel));
+		at91_adc_writel(st, AT91_ADC_IER, st->registers->drdy_mask);
 		at91_adc_writel(st, AT91_ADC_CR, AT91_ADC_START);
 
 		ret = wait_event_interruptible_timeout(st->wq_data_avail,
@@ -521,7 +520,7 @@ static int at91_adc_read_raw(struct iio_dev *idev,
 
 		at91_adc_writel(st, AT91_ADC_CHDR,
 				AT91_ADC_CH(chan->channel));
-		at91_adc_writel(st, AT91_ADC_IDR, BIT(chan->channel));
+		at91_adc_writel(st, AT91_ADC_IDR, st->registers->drdy_mask);
 
 		st->last_value = 0;
 		st->done = false;
@@ -766,17 +765,14 @@ static int at91_adc_probe_pdata(struct at91_adc_state *st,
 	if (!pdata)
 		return -EINVAL;
 
-	st->caps = (struct at91_adc_caps *)
-			platform_get_device_id(pdev)->driver_data;
-
 	st->use_external = pdata->use_external_triggers;
 	st->vref_mv = pdata->vref;
 	st->channels_mask = pdata->channels_used;
-	st->num_channels = st->caps->num_channels;
+	st->num_channels = pdata->num_channels;
 	st->startup_time = pdata->startup_time;
 	st->trigger_number = pdata->trigger_number;
 	st->trigger_list = pdata->trigger_list;
-	st->registers = &st->caps->registers;
+	st->registers = pdata->registers;
 
 	return 0;
 }
@@ -1105,6 +1101,7 @@ static int at91_adc_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_OF
 static struct at91_adc_caps at91sam9260_caps = {
 	.calc_startup_ticks = calc_startup_ticks_9260,
 	.num_channels = 4,
@@ -1157,27 +1154,11 @@ static const struct of_device_id at91_adc_dt_ids[] = {
 	{},
 };
 MODULE_DEVICE_TABLE(of, at91_adc_dt_ids);
-
-static const struct platform_device_id at91_adc_ids[] = {
-	{
-		.name = "at91sam9260-adc",
-		.driver_data = (unsigned long)&at91sam9260_caps,
-	}, {
-		.name = "at91sam9g45-adc",
-		.driver_data = (unsigned long)&at91sam9g45_caps,
-	}, {
-		.name = "at91sam9x5-adc",
-		.driver_data = (unsigned long)&at91sam9x5_caps,
-	}, {
-		/* terminator */
-	}
-};
-MODULE_DEVICE_TABLE(platform, at91_adc_ids);
+#endif
 
 static struct platform_driver at91_adc_driver = {
 	.probe = at91_adc_probe,
 	.remove = at91_adc_remove,
-	.id_table = at91_adc_ids,
 	.driver = {
 		   .name = DRIVER_NAME,
 		   .of_match_table = of_match_ptr(at91_adc_dt_ids),

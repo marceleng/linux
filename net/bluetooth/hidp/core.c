@@ -353,71 +353,6 @@ err:
 	return ret;
 }
 
-static int hidp_set_raw_report(struct hid_device *hid, unsigned char reportnum,
-			       unsigned char *data, size_t count,
-			       unsigned char report_type)
-{
-	struct hidp_session *session = hid->driver_data;
-	int ret;
-
-	switch (report_type) {
-	case HID_FEATURE_REPORT:
-		report_type = HIDP_TRANS_SET_REPORT | HIDP_DATA_RTYPE_FEATURE;
-		break;
-	case HID_INPUT_REPORT:
-		report_type = HIDP_TRANS_SET_REPORT | HIDP_DATA_RTYPE_INPUT;
-		break;
-	case HID_OUTPUT_REPORT:
-		report_type = HIDP_TRANS_SET_REPORT | HIDP_DATA_RTYPE_OUPUT;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	if (mutex_lock_interruptible(&session->report_mutex))
-		return -ERESTARTSYS;
-
-	/* Set up our wait, and send the report request to the device. */
-	data[0] = reportnum;
-	set_bit(HIDP_WAITING_FOR_SEND_ACK, &session->flags);
-	ret = hidp_send_ctrl_message(session, report_type, data, count);
-	if (ret)
-		goto err;
-
-	/* Wait for the ACK from the device. */
-	while (test_bit(HIDP_WAITING_FOR_SEND_ACK, &session->flags) &&
-	       !atomic_read(&session->terminate)) {
-		int res;
-
-		res = wait_event_interruptible_timeout(session->report_queue,
-			!test_bit(HIDP_WAITING_FOR_SEND_ACK, &session->flags)
-				|| atomic_read(&session->terminate),
-			10*HZ);
-		if (res == 0) {
-			/* timeout */
-			ret = -EIO;
-			goto err;
-		}
-		if (res < 0) {
-			/* signal */
-			ret = -ERESTARTSYS;
-			goto err;
-		}
-	}
-
-	if (!session->output_report_success) {
-		ret = -EIO;
-		goto err;
-	}
-
-	ret = count;
-
-err:
-	clear_bit(HIDP_WAITING_FOR_SEND_ACK, &session->flags);
-	mutex_unlock(&session->report_mutex);
-	return ret;
-}
-
 static int hidp_output_raw_report(struct hid_device *hid, unsigned char *data, size_t count,
 		unsigned char report_type)
 {
@@ -476,29 +411,6 @@ err:
 	return ret;
 }
 
-static int hidp_raw_request(struct hid_device *hid, unsigned char reportnum,
-			    __u8 *buf, size_t len, unsigned char rtype,
-			    int reqtype)
-{
-	switch (reqtype) {
-	case HID_REQ_GET_REPORT:
-		return hidp_get_raw_report(hid, reportnum, buf, len, rtype);
-	case HID_REQ_SET_REPORT:
-		return hidp_set_raw_report(hid, reportnum, buf, len, rtype);
-	default:
-		return -EIO;
-	}
-}
-
-static int hidp_output_report(struct hid_device *hid, __u8 *data, size_t count)
-{
-	struct hidp_session *session = hid->driver_data;
-
-	return hidp_send_intr_message(session,
-				      HIDP_TRANS_DATA | HIDP_DATA_RTYPE_OUPUT,
-				      data, count);
-}
-
 static void hidp_idle_timeout(unsigned long arg)
 {
 	struct hidp_session *session = (struct hidp_session *) arg;
@@ -516,16 +428,6 @@ static void hidp_del_timer(struct hidp_session *session)
 {
 	if (session->idle_to > 0)
 		del_timer(&session->timer);
-}
-
-static void hidp_process_report(struct hidp_session *session,
-				int type, const u8 *data, int len, int intr)
-{
-	if (len > HID_MAX_BUFFER_SIZE)
-		len = HID_MAX_BUFFER_SIZE;
-
-	memcpy(session->input_buf, data, len);
-	hid_input_report(session->hid, type, session->input_buf, len, intr);
 }
 
 static void hidp_process_handshake(struct hidp_session *session,
@@ -600,8 +502,7 @@ static int hidp_process_data(struct hidp_session *session, struct sk_buff *skb,
 			hidp_input_report(session, skb);
 
 		if (session->hid)
-			hidp_process_report(session, HID_INPUT_REPORT,
-					    skb->data, skb->len, 0);
+			hid_input_report(session->hid, HID_INPUT_REPORT, skb->data, skb->len, 0);
 		break;
 
 	case HIDP_DATA_RTYPE_OTHER:
@@ -683,8 +584,7 @@ static void hidp_recv_intr_frame(struct hidp_session *session,
 			hidp_input_report(session, skb);
 
 		if (session->hid) {
-			hidp_process_report(session, HID_INPUT_REPORT,
-					    skb->data, skb->len, 1);
+			hid_input_report(session->hid, HID_INPUT_REPORT, skb->data, skb->len, 1);
 			BT_DBG("report len %d", skb->len);
 		}
 	} else {
@@ -827,8 +727,6 @@ static struct hid_ll_driver hidp_hid_driver = {
 	.stop = hidp_stop,
 	.open  = hidp_open,
 	.close = hidp_close,
-	.raw_request = hidp_raw_request,
-	.output_report = hidp_output_report,
 	.hidinput_input_event = hidp_hidinput_event,
 };
 
@@ -877,6 +775,7 @@ static int hidp_setup_hid(struct hidp_session *session,
 	hid->dev.parent = &session->conn->hcon->dev;
 	hid->ll_driver = &hidp_hid_driver;
 
+	hid->hid_get_raw_report = hidp_get_raw_report;
 	hid->hid_output_raw_report = hidp_output_raw_report;
 
 	/* True if device is blacklisted in drivers/hid/hid-core.c */

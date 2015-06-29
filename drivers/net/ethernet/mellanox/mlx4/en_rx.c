@@ -40,7 +40,6 @@
 #include <linux/if_ether.h>
 #include <linux/if_vlan.h>
 #include <linux/vmalloc.h>
-#include <linux/irq.h>
 
 #include "mlx4_en.h"
 
@@ -316,32 +315,6 @@ static void mlx4_en_free_rx_buf(struct mlx4_en_priv *priv,
 		en_dbg(DRV, priv, "Processing descriptor:%d\n", index);
 		mlx4_en_free_rx_desc(priv, ring, index);
 		++ring->cons;
-	}
-}
-
-void mlx4_en_set_num_rx_rings(struct mlx4_en_dev *mdev)
-{
-	int i;
-	int num_of_eqs;
-	int num_rx_rings;
-	struct mlx4_dev *dev = mdev->dev;
-
-	mlx4_foreach_port(i, dev, MLX4_PORT_TYPE_ETH) {
-		if (!dev->caps.comp_pool)
-			num_of_eqs = max_t(int, MIN_RX_RINGS,
-					   min_t(int,
-						 dev->caps.num_comp_vectors,
-						 DEF_RX_RINGS));
-		else
-			num_of_eqs = min_t(int, MAX_MSIX_P_PORT,
-					   dev->caps.comp_pool/
-					   dev->caps.num_ports) - 1;
-
-		num_rx_rings = mlx4_low_memory_profile() ? MIN_RX_RINGS :
-			min_t(int, num_of_eqs,
-			      netif_get_num_default_rss_queues());
-		mdev->profile.prof[i].rx_ring_num =
-			rounddown_pow_of_two(num_rx_rings);
 	}
 }
 
@@ -658,19 +631,15 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 	int ip_summed;
 	int factor = priv->cqe_factor;
 	u64 timestamp;
-	bool l2_tunnel;
 
 	if (!priv->port_up)
 		return 0;
-
-	if (budget <= 0)
-		return polled;
 
 	/* We assume a 1:1 mapping between CQEs and Rx descriptors, so Rx
 	 * descriptor offset can be deduced from the CQE index instead of
 	 * reading 'cqe->index' */
 	index = cq->mcq.cons_index & ring->size_mask;
-	cqe = mlx4_en_get_cqe(cq->buf, index, priv->cqe_size) + factor;
+	cqe = &cq->buf[(index << factor) + factor];
 
 	/* Process all completed CQEs */
 	while (XNOR(cqe->owner_sr_opcode & MLX4_CQE_OWNER_MASK,
@@ -740,8 +709,6 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 		length -= ring->fcs_del;
 		ring->bytes += length;
 		ring->packets++;
-		l2_tunnel = (dev->hw_enc_features & NETIF_F_RXCSUM) &&
-			(cqe->vlan_my_qpn & cpu_to_be32(MLX4_CQE_L2_TUNNEL));
 
 		if (likely(dev->features & NETIF_F_RXCSUM)) {
 			if ((cqe->status & cpu_to_be16(MLX4_CQE_STATUS_IPOK)) &&
@@ -754,7 +721,7 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 				 * - not an IP fragment
 				 * - no LLS polling in progress
 				 */
-				if (!mlx4_en_cq_busy_polling(cq) &&
+				if (!mlx4_en_cq_ll_polling(cq) &&
 				    (dev->features & NETIF_F_GRO)) {
 					struct sk_buff *gro_skb = napi_get_frags(&cq->napi);
 					if (!gro_skb)
@@ -771,8 +738,6 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 					gro_skb->data_len = length;
 					gro_skb->ip_summed = CHECKSUM_UNNECESSARY;
 
-					if (l2_tunnel)
-						gro_skb->encapsulation = 1;
 					if ((cqe->vlan_my_qpn &
 					    cpu_to_be32(MLX4_CQE_VLAN_PRESENT_MASK)) &&
 					    (dev->features & NETIF_F_HW_VLAN_CTAG_RX)) {
@@ -823,9 +788,6 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 		skb->protocol = eth_type_trans(skb, dev);
 		skb_record_rx_queue(skb, cq->ring);
 
-		if (l2_tunnel)
-			skb->encapsulation = 1;
-
 		if (dev->features & NETIF_F_RXHASH)
 			skb->rxhash = be32_to_cpu(cqe->immed_rss_invalid);
 
@@ -842,10 +804,8 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 
 		skb_mark_napi_id(skb, &cq->napi);
 
-		if (!mlx4_en_cq_busy_polling(cq))
-			napi_gro_receive(&cq->napi, skb);
-		else
-			netif_receive_skb(skb);
+		/* Push it up the stack */
+		netif_receive_skb(skb);
 
 next:
 		for (nr = 0; nr < priv->num_frags; nr++)
@@ -853,7 +813,7 @@ next:
 
 		++cq->mcq.cons_index;
 		index = (cq->mcq.cons_index) & ring->size_mask;
-		cqe = mlx4_en_get_cqe(cq->buf, index, priv->cqe_size) + factor;
+		cqe = &cq->buf[(index << factor) + factor];
 		if (++polled == budget)
 			goto out;
 	}
@@ -896,25 +856,9 @@ int mlx4_en_poll_rx_cq(struct napi_struct *napi, int budget)
 	mlx4_en_cq_unlock_napi(cq);
 
 	/* If we used up all the quota - we're probably not done yet... */
-	if (done == budget) {
-		int cpu_curr;
-		const struct cpumask *aff;
-
+	if (done == budget)
 		INC_PERF_COUNTER(priv->pstats.napi_quota);
-
-		cpu_curr = smp_processor_id();
-		aff = irq_desc_get_irq_data(cq->irq_desc)->affinity;
-
-		if (unlikely(!cpumask_test_cpu(cpu_curr, aff))) {
-			/* Current cpu is not according to smp_irq_affinity -
-			 * probably affinity changed. need to stop this NAPI
-			 * poll, and restart it on the right CPU
-			 */
-			napi_complete(napi);
-			mlx4_en_arm_cq(priv, cq);
-			return 0;
-		}
-	} else {
+	else {
 		/* Done for now */
 		napi_complete(napi);
 		mlx4_en_arm_cq(priv, cq);
@@ -1109,12 +1053,6 @@ int mlx4_en_config_rss_steer(struct mlx4_en_priv *priv)
 		rss_mask |=  MLX4_RSS_UDP_IPV4 | MLX4_RSS_UDP_IPV6;
 		rss_context->base_qpn_udp = rss_context->default_qpn;
 	}
-
-	if (mdev->dev->caps.tunnel_offload_mode == MLX4_TUNNEL_OFFLOAD_MODE_VXLAN) {
-		en_info(priv, "Setting RSS context tunnel type to RSS on inner headers\n");
-		rss_mask |= MLX4_RSS_BY_INNER_HEADERS;
-	}
-
 	rss_context->flags = rss_mask;
 	rss_context->hash_fn = MLX4_RSS_HASH_TOP;
 	for (i = 0; i < 10; i++)

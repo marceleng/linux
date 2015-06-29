@@ -414,7 +414,6 @@ static void handle_stsi_3_2_2(struct kvm_vcpu *vcpu, struct sysinfo_3_2_2 *mem)
 	for (n = mem->count - 1; n > 0 ; n--)
 		memcpy(&mem->vm[n], &mem->vm[n - 1], sizeof(mem->vm[0]));
 
-	memset(&mem->vm[0], 0, sizeof(mem->vm[0]));
 	mem->vm[0].cpus_total = cpus;
 	mem->vm[0].cpus_configured = cpus;
 	mem->vm[0].cpus_standby = 0;
@@ -689,7 +688,7 @@ int kvm_s390_handle_lctl(struct kvm_vcpu *vcpu)
 			break;
 		reg = (reg + 1) % 16;
 	} while (1);
-	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+
 	return 0;
 }
 
@@ -726,7 +725,7 @@ static int handle_lctlg(struct kvm_vcpu *vcpu)
 			break;
 		reg = (reg + 1) % 16;
 	} while (1);
-	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+
 	return 0;
 }
 

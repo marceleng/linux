@@ -99,7 +99,7 @@ enum {
 
 enum {
 	MLX5_MAX_RECLAIM_TIME_MILI	= 5000,
-	MLX5_NUM_4K_IN_PAGE		= PAGE_SIZE / MLX5_ADAPTER_PAGE_SIZE,
+	MLX5_NUM_4K_IN_PAGE		= PAGE_SIZE / 4096,
 };
 
 static int insert_page(struct mlx5_core_dev *dev, u64 addr, struct page *page, u16 func_id)
@@ -192,8 +192,10 @@ static int alloc_4k(struct mlx5_core_dev *dev, u64 *addr)
 	struct fw_page *fp;
 	unsigned n;
 
-	if (list_empty(&dev->priv.free_list))
+	if (list_empty(&dev->priv.free_list)) {
 		return -ENOMEM;
+		mlx5_core_warn(dev, "\n");
+	}
 
 	fp = list_entry(dev->priv.free_list.next, struct fw_page, list);
 	n = find_first_bit(&fp->bitmask, 8 * sizeof(fp->bitmask));
@@ -206,33 +208,30 @@ static int alloc_4k(struct mlx5_core_dev *dev, u64 *addr)
 	if (!fp->free_count)
 		list_del(&fp->list);
 
-	*addr = fp->addr + n * MLX5_ADAPTER_PAGE_SIZE;
+	*addr = fp->addr + n * 4096;
 
 	return 0;
 }
-
-#define MLX5_U64_4K_PAGE_MASK ((~(u64)0U) << PAGE_SHIFT)
 
 static void free_4k(struct mlx5_core_dev *dev, u64 addr)
 {
 	struct fw_page *fwp;
 	int n;
 
-	fwp = find_fw_page(dev, addr & MLX5_U64_4K_PAGE_MASK);
+	fwp = find_fw_page(dev, addr & PAGE_MASK);
 	if (!fwp) {
 		mlx5_core_warn(dev, "page not found\n");
 		return;
 	}
 
-	n = (addr & ~MLX5_U64_4K_PAGE_MASK) >> MLX5_ADAPTER_PAGE_SHIFT;
+	n = (addr & ~PAGE_MASK) % 4096;
 	fwp->free_count++;
 	set_bit(n, &fwp->bitmask);
 	if (fwp->free_count == MLX5_NUM_4K_IN_PAGE) {
 		rb_erase(&fwp->rb_node, &dev->priv.page_root);
 		if (fwp->free_count != 1)
 			list_del(&fwp->list);
-		dma_unmap_page(&dev->pdev->dev, addr & MLX5_U64_4K_PAGE_MASK,
-			       PAGE_SIZE, DMA_BIDIRECTIONAL);
+		dma_unmap_page(&dev->pdev->dev, addr, PAGE_SIZE, DMA_BIDIRECTIONAL);
 		__free_page(fwp->page);
 		kfree(fwp);
 	} else if (fwp->free_count == 1) {

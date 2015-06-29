@@ -12262,10 +12262,6 @@ static int bnx2x_init_dev(struct bnx2x *bp, struct pci_dev *pdev,
 	/* clean indirect addresses */
 	pci_write_config_dword(bp->pdev, PCICFG_GRC_ADDRESS,
 			       PCICFG_VENDOR_ID_OFFSET);
-
-	/* Set PCIe reset type to fundamental for EEH recovery */
-	pdev->needs_freset = 1;
-
 	/*
 	 * Clean the following indirect addresses for all functions since it
 	 * is not used by the driver.
@@ -13002,8 +12998,8 @@ static int bnx2x_eeh_nic_unload(struct bnx2x *bp)
 	netdev_reset_tc(bp->dev);
 
 	del_timer_sync(&bp->timer);
-	cancel_delayed_work_sync(&bp->sp_task);
-	cancel_delayed_work_sync(&bp->period_task);
+	cancel_delayed_work(&bp->sp_task);
+	cancel_delayed_work(&bp->period_task);
 
 	spin_lock_bh(&bp->stats_lock);
 	bp->stats_state = STATS_STATE_DISABLED;

@@ -42,7 +42,9 @@
 
 static struct team_port *team_port_get_rcu(const struct net_device *dev)
 {
-	return rcu_dereference(dev->rx_handler_data);
+	struct team_port *port = rcu_dereference(dev->rx_handler_data);
+
+	return team_port_exists(dev) ? port : NULL;
 }
 
 static struct team_port *team_port_get_rtnl(const struct net_device *dev)
@@ -627,7 +629,6 @@ static int team_change_mode(struct team *team, const char *kind)
 static void team_notify_peers_work(struct work_struct *work)
 {
 	struct team *team;
-	int val;
 
 	team = container_of(work, struct team, notify_peers.dw.work);
 
@@ -635,14 +636,9 @@ static void team_notify_peers_work(struct work_struct *work)
 		schedule_delayed_work(&team->notify_peers.dw, 0);
 		return;
 	}
-	val = atomic_dec_if_positive(&team->notify_peers.count_pending);
-	if (val < 0) {
-		rtnl_unlock();
-		return;
-	}
 	call_netdevice_notifiers(NETDEV_NOTIFY_PEERS, team->dev);
 	rtnl_unlock();
-	if (val)
+	if (!atomic_dec_and_test(&team->notify_peers.count_pending))
 		schedule_delayed_work(&team->notify_peers.dw,
 				      msecs_to_jiffies(team->notify_peers.interval));
 }
@@ -651,7 +647,7 @@ static void team_notify_peers(struct team *team)
 {
 	if (!team->notify_peers.count || !netif_running(team->dev))
 		return;
-	atomic_add(team->notify_peers.count, &team->notify_peers.count_pending);
+	atomic_set(&team->notify_peers.count_pending, team->notify_peers.count);
 	schedule_delayed_work(&team->notify_peers.dw, 0);
 }
 
@@ -673,7 +669,6 @@ static void team_notify_peers_fini(struct team *team)
 static void team_mcast_rejoin_work(struct work_struct *work)
 {
 	struct team *team;
-	int val;
 
 	team = container_of(work, struct team, mcast_rejoin.dw.work);
 
@@ -681,14 +676,9 @@ static void team_mcast_rejoin_work(struct work_struct *work)
 		schedule_delayed_work(&team->mcast_rejoin.dw, 0);
 		return;
 	}
-	val = atomic_dec_if_positive(&team->mcast_rejoin.count_pending);
-	if (val < 0) {
-		rtnl_unlock();
-		return;
-	}
 	call_netdevice_notifiers(NETDEV_RESEND_IGMP, team->dev);
 	rtnl_unlock();
-	if (val)
+	if (!atomic_dec_and_test(&team->mcast_rejoin.count_pending))
 		schedule_delayed_work(&team->mcast_rejoin.dw,
 				      msecs_to_jiffies(team->mcast_rejoin.interval));
 }
@@ -697,7 +687,7 @@ static void team_mcast_rejoin(struct team *team)
 {
 	if (!team->mcast_rejoin.count || !netif_running(team->dev))
 		return;
-	atomic_add(team->mcast_rejoin.count, &team->mcast_rejoin.count_pending);
+	atomic_set(&team->mcast_rejoin.count_pending, team->mcast_rejoin.count);
 	schedule_delayed_work(&team->mcast_rejoin.dw, 0);
 }
 
@@ -1658,7 +1648,7 @@ static netdev_tx_t team_xmit(struct sk_buff *skb, struct net_device *dev)
 }
 
 static u16 team_select_queue(struct net_device *dev, struct sk_buff *skb,
-			     void *accel_priv, select_queue_fallback_t fallback)
+			     void *accel_priv)
 {
 	/*
 	 * This helper function exists to help dev_pick_tx get the correct
@@ -1723,11 +1713,11 @@ static int team_set_mac_address(struct net_device *dev, void *p)
 	if (dev->type == ARPHRD_ETHER && !is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
-	mutex_lock(&team->lock);
-	list_for_each_entry(port, &team->port_list, list)
+	rcu_read_lock();
+	list_for_each_entry_rcu(port, &team->port_list, list)
 		if (team->ops.port_change_dev_addr)
 			team->ops.port_change_dev_addr(team, port);
-	mutex_unlock(&team->lock);
+	rcu_read_unlock();
 	return 0;
 }
 
@@ -1742,7 +1732,6 @@ static int team_change_mtu(struct net_device *dev, int new_mtu)
 	 * to traverse list in reverse under rcu_read_lock
 	 */
 	mutex_lock(&team->lock);
-	team->port_mtu_change_allowed = true;
 	list_for_each_entry(port, &team->port_list, list) {
 		err = dev_set_mtu(port->dev, new_mtu);
 		if (err) {
@@ -1751,7 +1740,6 @@ static int team_change_mtu(struct net_device *dev, int new_mtu)
 			goto unwind;
 		}
 	}
-	team->port_mtu_change_allowed = false;
 	mutex_unlock(&team->lock);
 
 	dev->mtu = new_mtu;
@@ -1761,7 +1749,6 @@ static int team_change_mtu(struct net_device *dev, int new_mtu)
 unwind:
 	list_for_each_entry_continue_reverse(port, &team->port_list, list)
 		dev_set_mtu(port->dev, dev->mtu);
-	team->port_mtu_change_allowed = false;
 	mutex_unlock(&team->lock);
 
 	return err;
@@ -1780,13 +1767,13 @@ team_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 	for_each_possible_cpu(i) {
 		p = per_cpu_ptr(team->pcpu_stats, i);
 		do {
-			start = u64_stats_fetch_begin_irq(&p->syncp);
+			start = u64_stats_fetch_begin_bh(&p->syncp);
 			rx_packets	= p->rx_packets;
 			rx_bytes	= p->rx_bytes;
 			rx_multicast	= p->rx_multicast;
 			tx_packets	= p->tx_packets;
 			tx_bytes	= p->tx_bytes;
-		} while (u64_stats_fetch_retry_irq(&p->syncp, start));
+		} while (u64_stats_fetch_retry_bh(&p->syncp, start));
 
 		stats->rx_packets	+= rx_packets;
 		stats->rx_bytes		+= rx_bytes;
@@ -2866,9 +2853,7 @@ static int team_device_event(struct notifier_block *unused,
 		break;
 	case NETDEV_CHANGEMTU:
 		/* Forbid to change mtu of underlaying device */
-		if (!port->team->port_mtu_change_allowed)
-			return NOTIFY_BAD;
-		break;
+		return NOTIFY_BAD;
 	case NETDEV_PRE_TYPE_CHANGE:
 		/* Forbid to change type of underlaying device */
 		return NOTIFY_BAD;

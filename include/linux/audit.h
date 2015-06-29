@@ -46,7 +46,6 @@ struct audit_tree;
 
 struct audit_krule {
 	int			vers_ops;
-	u32			pflags;
 	u32			flags;
 	u32			listnr;
 	u32			action;
@@ -63,9 +62,6 @@ struct audit_krule {
 	struct list_head	list;	/* for AUDIT_LIST* purposes only */
 	u64			prio;
 };
-
-/* Flag to indicate legacy AUDIT_LOGINUID unset usage */
-#define AUDIT_LOGINUID_LEGACY		0x1
 
 struct audit_field {
 	u32				type;

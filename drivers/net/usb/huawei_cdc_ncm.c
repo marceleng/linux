@@ -84,13 +84,12 @@ static int huawei_cdc_ncm_bind(struct usbnet *usbnet_dev,
 	ctx = drvstate->ctx;
 
 	if (usbnet_dev->status)
-		/* The wMaxCommand buffer must be big enough to hold
-		 * any message from the modem. Experience has shown
-		 * that some replies are more than 256 bytes long
+		/* CDC-WMC r1.1 requires wMaxCommand to be "at least 256
+		 * decimal (0x100)"
 		 */
 		subdriver = usb_cdc_wdm_register(ctx->control,
 						 &usbnet_dev->status->desc,
-						 1024, /* wMaxCommand */
+						 256, /* wMaxCommand */
 						 huawei_cdc_ncm_wdm_manage_power);
 	if (IS_ERR(subdriver)) {
 		ret = PTR_ERR(subdriver);
@@ -205,9 +204,6 @@ static const struct usb_device_id huawei_cdc_ncm_devs[] = {
 	  .driver_info = (unsigned long)&huawei_cdc_ncm_info,
 	},
 	{ USB_VENDOR_AND_INTERFACE_INFO(0x12d1, 0xff, 0x02, 0x76),
-	  .driver_info = (unsigned long)&huawei_cdc_ncm_info,
-	},
-	{ USB_VENDOR_AND_INTERFACE_INFO(0x12d1, 0xff, 0x03, 0x16),
 	  .driver_info = (unsigned long)&huawei_cdc_ncm_info,
 	},
 

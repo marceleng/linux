@@ -8,4 +8,5 @@ firewire-core-modules
 usb-modules
 mouse-modules
 irda-modules
+sata-modules
 speakup-modules

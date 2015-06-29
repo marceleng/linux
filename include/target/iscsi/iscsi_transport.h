@@ -68,8 +68,7 @@ extern void iscsit_build_nopin_rsp(struct iscsi_cmd *, struct iscsi_conn *,
 extern void iscsit_build_task_mgt_rsp(struct iscsi_cmd *, struct iscsi_conn *,
 				struct iscsi_tm_rsp *);
 extern int iscsit_build_text_rsp(struct iscsi_cmd *, struct iscsi_conn *,
-				struct iscsi_text_rsp *,
-				enum iscsit_transport_type);
+				struct iscsi_text_rsp *);
 extern void iscsit_build_reject(struct iscsi_cmd *, struct iscsi_conn *,
 				struct iscsi_reject *);
 extern int iscsit_build_logout_rsp(struct iscsi_cmd *, struct iscsi_conn *,
@@ -96,7 +95,7 @@ extern int iscsit_tmr_post_handler(struct iscsi_cmd *, struct iscsi_conn *);
 /*
  * From iscsi_target_util.c
  */
-extern struct iscsi_cmd *iscsit_allocate_cmd(struct iscsi_conn *, int);
+extern struct iscsi_cmd *iscsit_allocate_cmd(struct iscsi_conn *, gfp_t);
 extern int iscsit_sequence_cmd(struct iscsi_conn *, struct iscsi_cmd *,
 			       unsigned char *, __be32);
 extern void iscsit_release_cmd(struct iscsi_cmd *);

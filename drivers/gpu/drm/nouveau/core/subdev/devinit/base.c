@@ -24,10 +24,9 @@
 
 #include <core/option.h>
 
+#include <subdev/devinit.h>
 #include <subdev/bios.h>
 #include <subdev/bios/init.h>
-
-#include "priv.h"
 
 int
 _nouveau_devinit_fini(struct nouveau_object *object, bool suspend)
@@ -44,21 +43,12 @@ _nouveau_devinit_fini(struct nouveau_object *object, bool suspend)
 int
 _nouveau_devinit_init(struct nouveau_object *object)
 {
-	struct nouveau_devinit_impl *impl = (void *)object->oclass;
 	struct nouveau_devinit *devinit = (void *)object;
-	int ret;
-
-	ret = nouveau_subdev_init(&devinit->base);
+	int ret = nouveau_subdev_init(&devinit->base);
 	if (ret)
 		return ret;
 
-	ret = nvbios_init(&devinit->base, devinit->post);
-	if (ret)
-		return ret;
-
-	if (impl->disable)
-		nv_device(devinit)->disable_mask |= impl->disable(devinit);
-	return 0;
+	return nvbios_init(&devinit->base, devinit->post);
 }
 
 int
@@ -67,7 +57,6 @@ nouveau_devinit_create_(struct nouveau_object *parent,
 			struct nouveau_oclass *oclass,
 			int size, void **pobject)
 {
-	struct nouveau_devinit_impl *impl = (void *)oclass;
 	struct nouveau_device *device = nv_device(parent);
 	struct nouveau_devinit *devinit;
 	int ret;
@@ -79,7 +68,5 @@ nouveau_devinit_create_(struct nouveau_object *parent,
 		return ret;
 
 	devinit->post = nouveau_boolopt(device->cfgopt, "NvForcePost", false);
-	devinit->meminit = impl->meminit;
-	devinit->pll_set = impl->pll_set;
 	return 0;
 }

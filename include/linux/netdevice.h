@@ -739,9 +739,6 @@ struct netdev_phys_port_id {
 	unsigned char id_len;
 };
 
-typedef u16 (*select_queue_fallback_t)(struct net_device *dev,
-				       struct sk_buff *skb);
-
 /*
  * This structure defines the management hooks for network devices.
  * The following hooks can be defined; unless noted otherwise, they are
@@ -773,7 +770,7 @@ typedef u16 (*select_queue_fallback_t)(struct net_device *dev,
  *	Required can not be NULL.
  *
  * u16 (*ndo_select_queue)(struct net_device *dev, struct sk_buff *skb,
- *                         void *accel_priv, select_queue_fallback_t fallback);
+ *                         void *accel_priv);
  *	Called to decide which queue to when device supports multiple
  *	transmit queues.
  *
@@ -995,8 +992,7 @@ struct net_device_ops {
 						   struct net_device *dev);
 	u16			(*ndo_select_queue)(struct net_device *dev,
 						    struct sk_buff *skb,
-						    void *accel_priv,
-						    select_queue_fallback_t fallback);
+						    void *accel_priv);
 	void			(*ndo_change_rx_flags)(struct net_device *dev,
 						       int flags);
 	void			(*ndo_set_rx_mode)(struct net_device *dev);
@@ -1132,7 +1128,6 @@ struct net_device_ops {
 	netdev_tx_t		(*ndo_dfwd_start_xmit) (struct sk_buff *skb,
 							struct net_device *dev,
 							void *priv);
-	int			(*ndo_get_lock_subclass)(struct net_device *dev);
 };
 
 /*
@@ -1538,6 +1533,7 @@ static inline void netdev_for_each_tx_queue(struct net_device *dev,
 struct netdev_queue *netdev_pick_tx(struct net_device *dev,
 				    struct sk_buff *skb,
 				    void *accel_priv);
+u16 __netdev_pick_tx(struct net_device *dev, struct sk_buff *skb);
 
 /*
  * Net namespace inlines
@@ -1636,10 +1632,7 @@ struct napi_gro_cb {
 	int data_offset;
 
 	/* This is non-zero if the packet cannot be merged with the new skb. */
-	u16	flush;
-
-	/* Save the IP ID here and check when we get to the transport layer */
-	u16	flush_id;
+	int flush;
 
 	/* Number of segments aggregated. */
 	u16	count;
@@ -1656,13 +1649,7 @@ struct napi_gro_cb {
 	unsigned long age;
 
 	/* Used in ipv6_gro_receive() */
-	u16	proto;
-
-	/* Used in udp_gro_receive */
-	u16	udp_mark;
-
-	/* used to support CHECKSUM_COMPLETE for tunneling protocols */
-	__wsum	csum;
+	int	proto;
 
 	/* used in skb_gro_receive() slow path */
 	struct sk_buff *last;
@@ -1689,27 +1676,13 @@ struct offload_callbacks {
 	int			(*gso_send_check)(struct sk_buff *skb);
 	struct sk_buff		**(*gro_receive)(struct sk_buff **head,
 					       struct sk_buff *skb);
-	int			(*gro_complete)(struct sk_buff *skb, int nhoff);
+	int			(*gro_complete)(struct sk_buff *skb);
 };
 
 struct packet_offload {
 	__be16			 type;	/* This is really htons(ether_type). */
 	struct offload_callbacks callbacks;
 	struct list_head	 list;
-};
-
-struct udp_offload {
-	__be16			 port;
-	struct offload_callbacks callbacks;
-};
-
-/* often modified stats are per cpu, other are shared (netdev->stats) */
-struct pcpu_sw_netstats {
-	u64     rx_packets;
-	u64     rx_bytes;
-	u64     tx_packets;
-	u64     tx_bytes;
-	struct u64_stats_sync   syncp;
 };
 
 #include <linux/notifier.h>
@@ -1864,12 +1837,6 @@ void netdev_freemem(struct net_device *dev);
 void synchronize_net(void);
 int init_dummy_netdev(struct net_device *dev);
 
-DECLARE_PER_CPU(int, xmit_recursion);
-static inline int dev_recursion_level(void)
-{
-	return this_cpu_read(xmit_recursion);
-}
-
 struct net_device *dev_get_by_index(struct net *net, int ifindex);
 struct net_device *__dev_get_by_index(struct net *net, int ifindex);
 struct net_device *dev_get_by_index_rcu(struct net *net, int ifindex);
@@ -1917,18 +1884,15 @@ static inline void *skb_gro_header_slow(struct sk_buff *skb, unsigned int hlen,
 	return skb->data + offset;
 }
 
+static inline void *skb_gro_mac_header(struct sk_buff *skb)
+{
+	return NAPI_GRO_CB(skb)->frag0 ?: skb_mac_header(skb);
+}
+
 static inline void *skb_gro_network_header(struct sk_buff *skb)
 {
 	return (NAPI_GRO_CB(skb)->frag0 ?: skb->data) +
 	       skb_network_offset(skb);
-}
-
-static inline void skb_gro_postpull_rcsum(struct sk_buff *skb,
-					const void *start, unsigned int len)
-{
-	if (skb->ip_summed == CHECKSUM_COMPLETE)
-		NAPI_GRO_CB(skb)->csum = csum_sub(NAPI_GRO_CB(skb)->csum,
-						  csum_partial(start, len, 0));
 }
 
 static inline int dev_hard_header(struct sk_buff *skb, struct net_device *dev,
@@ -2436,8 +2400,6 @@ gro_result_t napi_gro_receive(struct napi_struct *napi, struct sk_buff *skb);
 void napi_gro_flush(struct napi_struct *napi, bool flush_old);
 struct sk_buff *napi_get_frags(struct napi_struct *napi);
 gro_result_t napi_gro_frags(struct napi_struct *napi);
-struct packet_offload *gro_find_receive_by_type(__be16 type);
-struct packet_offload *gro_find_complete_by_type(__be16 type);
 
 static inline void napi_free_frags(struct napi_struct *napi)
 {
@@ -2780,12 +2742,7 @@ static inline void netif_addr_lock(struct net_device *dev)
 
 static inline void netif_addr_lock_nested(struct net_device *dev)
 {
-	int subclass = SINGLE_DEPTH_NESTING;
-
-	if (dev->netdev_ops->ndo_get_lock_subclass)
-		subclass = dev->netdev_ops->ndo_get_lock_subclass(dev);
-
-	spin_lock_nested(&dev->addr_list_lock, subclass);
+	spin_lock_nested(&dev->addr_list_lock, SINGLE_DEPTH_NESTING);
 }
 
 static inline void netif_addr_lock_bh(struct net_device *dev)
@@ -2924,14 +2881,6 @@ void *netdev_lower_get_next_private_rcu(struct net_device *dev,
 	     priv; \
 	     priv = netdev_lower_get_next_private_rcu(dev, &(iter)))
 
-void *netdev_lower_get_next(struct net_device *dev,
-				struct list_head **iter);
-#define netdev_for_each_lower_dev(dev, ldev, iter) \
-	for (iter = &(dev)->adj_list.lower, \
-	     ldev = netdev_lower_get_next(dev, &(iter)); \
-	     ldev; \
-	     ldev = netdev_lower_get_next(dev, &(iter)))
-
 void *netdev_adjacent_get_private(struct list_head *adj_list);
 struct net_device *netdev_master_upper_dev_get(struct net_device *dev);
 struct net_device *netdev_master_upper_dev_get_rcu(struct net_device *dev);
@@ -2943,13 +2892,10 @@ int netdev_master_upper_dev_link_private(struct net_device *dev,
 					 void *private);
 void netdev_upper_dev_unlink(struct net_device *dev,
 			     struct net_device *upper_dev);
-void netdev_adjacent_rename_links(struct net_device *dev, char *oldname);
 void *netdev_lower_dev_get_private_rcu(struct net_device *dev,
 				       struct net_device *lower_dev);
 void *netdev_lower_dev_get_private(struct net_device *dev,
 				   struct net_device *lower_dev);
-int dev_get_nest_level(struct net_device *dev,
-		       bool (*type_check)(struct net_device *dev));
 int skb_checksum_help(struct sk_buff *skb);
 struct sk_buff *__skb_gso_segment(struct sk_buff *skb,
 				  netdev_features_t features, bool tx_path);

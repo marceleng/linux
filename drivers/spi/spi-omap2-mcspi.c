@@ -320,8 +320,7 @@ static void omap2_mcspi_set_fifo(const struct spi_device *spi,
 disable_fifo:
 	if (t->rx_buf != NULL)
 		chconf &= ~OMAP2_MCSPI_CHCONF_FFER;
-
-	if (t->tx_buf != NULL)
+	else
 		chconf &= ~OMAP2_MCSPI_CHCONF_FFET;
 
 	mcspi_write_chconf0(spi, chconf);

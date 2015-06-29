@@ -398,7 +398,7 @@ int kvm_arch_vcpu_setup(struct kvm_vcpu *vcpu)
 	vcpu->arch.sie_block->ecb2  = 8;
 	vcpu->arch.sie_block->eca   = 0xC1002001U;
 	vcpu->arch.sie_block->fac   = (int) (long) vfacilities;
-	hrtimer_init(&vcpu->arch.ckc_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer_init(&vcpu->arch.ckc_timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
 	tasklet_init(&vcpu->arch.tasklet, kvm_s390_tasklet,
 		     (unsigned long) vcpu);
 	vcpu->arch.ckc_timer.function = kvm_s390_idle_wakeup;
@@ -746,8 +746,7 @@ static int vcpu_post_run(struct kvm_vcpu *vcpu, int exit_reason)
 
 	if (rc == 0) {
 		if (kvm_is_ucontrol(vcpu->kvm))
-			/* Don't exit for host interrupts. */
-			rc = vcpu->arch.sie_block->icptcode ? -EOPNOTSUPP : 0;
+			rc = -EOPNOTSUPP;
 		else
 			rc = kvm_handle_sie_intercept(vcpu);
 	}
@@ -801,6 +800,18 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 	atomic_clear_mask(CPUSTAT_STOPPED, &vcpu->arch.sie_block->cpuflags);
 
 	BUG_ON(vcpu->kvm->arch.float_int.local_int[vcpu->vcpu_id] == NULL);
+
+	switch (kvm_run->exit_reason) {
+	case KVM_EXIT_S390_SIEIC:
+	case KVM_EXIT_UNKNOWN:
+	case KVM_EXIT_INTR:
+	case KVM_EXIT_S390_RESET:
+	case KVM_EXIT_S390_UCONTROL:
+	case KVM_EXIT_S390_TSCH:
+		break;
+	default:
+		BUG();
+	}
 
 	vcpu->arch.sie_block->gpsw.mask = kvm_run->psw_mask;
 	vcpu->arch.sie_block->gpsw.addr = kvm_run->psw_addr;

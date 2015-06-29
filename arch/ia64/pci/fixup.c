@@ -5,7 +5,6 @@
 
 #include <linux/pci.h>
 #include <linux/init.h>
-#include <linux/screen_info.h>
 
 #include <asm/machvec.h>
 
@@ -64,7 +63,7 @@ static void pci_fixup_video(struct pci_dev *pdev)
 	pci_read_config_word(pdev, PCI_COMMAND, &config);
 	if (config & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) {
 		pdev->resource[PCI_ROM_RESOURCE].flags |= IORESOURCE_ROM_SHADOW;
-		dev_printk(KERN_DEBUG, &pdev->dev, "Video device with shadowed ROM\n");
+		dev_printk(KERN_DEBUG, &pdev->dev, "Boot video device\n");
 	}
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_ANY_ID, PCI_ANY_ID, pci_fixup_video);

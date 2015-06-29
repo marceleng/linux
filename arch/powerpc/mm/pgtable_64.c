@@ -55,9 +55,6 @@
 
 #include "mmu_decl.h"
 
-#define CREATE_TRACE_POINTS
-#include <trace/events/thp.h>
-
 /* Some sanity checking */
 #if TASK_SIZE_USER64 > PGTABLE_RANGE
 #error TASK_SIZE_USER64 exceeds pagetable range
@@ -502,8 +499,7 @@ int pmdp_set_access_flags(struct vm_area_struct *vma, unsigned long address,
 }
 
 unsigned long pmd_hugepage_update(struct mm_struct *mm, unsigned long addr,
-				  pmd_t *pmdp, unsigned long clr,
-				  unsigned long set)
+				  pmd_t *pmdp, unsigned long clr)
 {
 
 	unsigned long old, tmp;
@@ -519,19 +515,17 @@ unsigned long pmd_hugepage_update(struct mm_struct *mm, unsigned long addr,
 		andi.	%1,%0,%6\n\
 		bne-	1b \n\
 		andc	%1,%0,%4 \n\
-		or	%1,%1,%7\n\
 		stdcx.	%1,0,%3 \n\
 		bne-	1b"
 	: "=&r" (old), "=&r" (tmp), "=m" (*pmdp)
-	: "r" (pmdp), "r" (clr), "m" (*pmdp), "i" (_PAGE_BUSY), "r" (set)
+	: "r" (pmdp), "r" (clr), "m" (*pmdp), "i" (_PAGE_BUSY)
 	: "cc" );
 #else
 	old = pmd_val(*pmdp);
-	*pmdp = __pmd((old & ~clr) | set);
+	*pmdp = __pmd(old & ~clr);
 #endif
-	trace_hugepage_update(addr, old, clr, set);
 	if (old & _PAGE_HASHPTE)
-		hpte_do_hugepage_flush(mm, addr, pmdp, old);
+		hpte_do_hugepage_flush(mm, addr, pmdp);
 	return old;
 }
 
@@ -635,11 +629,10 @@ void pmdp_splitting_flush(struct vm_area_struct *vma,
 	 * If we didn't had the splitting flag set, go and flush the
 	 * HPTE entries.
 	 */
-	trace_hugepage_splitting(address, old);
 	if (!(old & _PAGE_SPLITTING)) {
 		/* We need to flush the hpte */
 		if (old & _PAGE_HASHPTE)
-			hpte_do_hugepage_flush(vma->vm_mm, address, pmdp, old);
+			hpte_do_hugepage_flush(vma->vm_mm, address, pmdp);
 	}
 }
 
@@ -698,14 +691,13 @@ void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 	assert_spin_locked(&mm->page_table_lock);
 	WARN_ON(!pmd_trans_huge(pmd));
 #endif
-	trace_hugepage_set_pmd(addr, pmd);
 	return set_pte_at(mm, addr, pmdp_ptep(pmdp), pmd_pte(pmd));
 }
 
 void pmdp_invalidate(struct vm_area_struct *vma, unsigned long address,
 		     pmd_t *pmdp)
 {
-	pmd_hugepage_update(vma->vm_mm, address, pmdp, _PAGE_PRESENT, 0);
+	pmd_hugepage_update(vma->vm_mm, address, pmdp, _PAGE_PRESENT);
 }
 
 /*
@@ -713,7 +705,7 @@ void pmdp_invalidate(struct vm_area_struct *vma, unsigned long address,
  * neesd to be flushed.
  */
 void hpte_do_hugepage_flush(struct mm_struct *mm, unsigned long addr,
-			    pmd_t *pmdp, unsigned long old_pmd)
+			    pmd_t *pmdp)
 {
 	int ssize, i;
 	unsigned long s_addr;
@@ -735,29 +727,12 @@ void hpte_do_hugepage_flush(struct mm_struct *mm, unsigned long addr,
 	if (!hpte_slot_array)
 		return;
 
-	/* get the base page size,vsid and segment size */
-#ifdef CONFIG_DEBUG_VM
+	/* get the base page size */
 	psize = get_slice_psize(mm, s_addr);
-	BUG_ON(psize == MMU_PAGE_16M);
-#endif
-	if (old_pmd & _PAGE_COMBO)
-		psize = MMU_PAGE_4K;
-	else
-		psize = MMU_PAGE_64K;
-
-	if (!is_kernel_addr(s_addr)) {
-		ssize = user_segment_size(s_addr);
-		vsid = get_vsid(mm->context.id, s_addr, ssize);
-		WARN_ON(vsid == 0);
-	} else {
-		vsid = get_kernel_vsid(s_addr, mmu_kernel_ssize);
-		ssize = mmu_kernel_ssize;
-	}
 
 	if (ppc_md.hugepage_invalidate)
-		return ppc_md.hugepage_invalidate(vsid, s_addr,
-						  hpte_slot_array,
-						  psize, ssize);
+		return ppc_md.hugepage_invalidate(mm, hpte_slot_array,
+						  s_addr, psize);
 	/*
 	 * No bluk hpte removal support, invalidate each entry
 	 */
@@ -775,6 +750,15 @@ void hpte_do_hugepage_flush(struct mm_struct *mm, unsigned long addr,
 
 		/* get the vpn */
 		addr = s_addr + (i * (1ul << shift));
+		if (!is_kernel_addr(addr)) {
+			ssize = user_segment_size(addr);
+			vsid = get_vsid(mm->context.id, addr, ssize);
+			WARN_ON(vsid == 0);
+		} else {
+			vsid = get_kernel_vsid(addr, mmu_kernel_ssize);
+			ssize = mmu_kernel_ssize;
+		}
+
 		vpn = hpt_vpn(addr, vsid, ssize);
 		hash = hpt_hash(vpn, shift, ssize);
 		if (hidx & _PTEIDX_SECONDARY)
@@ -840,7 +824,7 @@ pmd_t pmdp_get_and_clear(struct mm_struct *mm,
 	unsigned long old;
 	pgtable_t *pgtable_slot;
 
-	old = pmd_hugepage_update(mm, addr, pmdp, ~0UL, 0);
+	old = pmd_hugepage_update(mm, addr, pmdp, ~0UL);
 	old_pmd = __pmd(old);
 	/*
 	 * We have pmd == none and we are holding page_table_lock.

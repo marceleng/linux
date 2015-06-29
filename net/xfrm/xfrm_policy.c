@@ -46,11 +46,6 @@ static DEFINE_SPINLOCK(xfrm_policy_sk_bundle_lock);
 static struct dst_entry *xfrm_policy_sk_bundles;
 static DEFINE_RWLOCK(xfrm_policy_lock);
 
-struct xfrm_flo {
-	struct dst_entry *dst_orig;
-	u8 flags;
-};
-
 static DEFINE_SPINLOCK(xfrm_policy_afinfo_lock);
 static struct xfrm_policy_afinfo __rcu *xfrm_policy_afinfo[NPROTO]
 						__read_mostly;
@@ -1887,14 +1882,13 @@ static int xdst_queue_output(struct sk_buff *skb)
 }
 
 static struct xfrm_dst *xfrm_create_dummy_bundle(struct net *net,
-						 struct xfrm_flo *xflo,
+						 struct dst_entry *dst,
 						 const struct flowi *fl,
 						 int num_xfrms,
 						 u16 family)
 {
 	int err;
 	struct net_device *dev;
-	struct dst_entry *dst;
 	struct dst_entry *dst1;
 	struct xfrm_dst *xdst;
 
@@ -1902,13 +1896,10 @@ static struct xfrm_dst *xfrm_create_dummy_bundle(struct net *net,
 	if (IS_ERR(xdst))
 		return xdst;
 
-	if (!(xflo->flags & XFRM_LOOKUP_QUEUE) ||
-	    net->xfrm.sysctl_larval_drop ||
-	    num_xfrms <= 0 ||
+	if (net->xfrm.sysctl_larval_drop || num_xfrms <= 0 ||
 	    (fl->flowi_flags & FLOWI_FLAG_CAN_SLEEP))
 		return xdst;
 
-	dst = xflo->dst_orig;
 	dst1 = &xdst->u.dst;
 	dst_hold(dst);
 	xdst->route = dst;
@@ -1950,7 +1941,7 @@ static struct flow_cache_object *
 xfrm_bundle_lookup(struct net *net, const struct flowi *fl, u16 family, u8 dir,
 		   struct flow_cache_object *oldflo, void *ctx)
 {
-	struct xfrm_flo *xflo = (struct xfrm_flo *)ctx;
+	struct dst_entry *dst_orig = (struct dst_entry *)ctx;
 	struct xfrm_policy *pols[XFRM_POLICY_TYPE_MAX];
 	struct xfrm_dst *xdst, *new_xdst;
 	int num_pols = 0, num_xfrms = 0, i, err, pol_dead;
@@ -1991,8 +1982,7 @@ xfrm_bundle_lookup(struct net *net, const struct flowi *fl, u16 family, u8 dir,
 			goto make_dummy_bundle;
 	}
 
-	new_xdst = xfrm_resolve_and_create_bundle(pols, num_pols, fl, family,
-						  xflo->dst_orig);
+	new_xdst = xfrm_resolve_and_create_bundle(pols, num_pols, fl, family, dst_orig);
 	if (IS_ERR(new_xdst)) {
 		err = PTR_ERR(new_xdst);
 		if (err != -EAGAIN)
@@ -2026,7 +2016,7 @@ make_dummy_bundle:
 	/* We found policies, but there's no bundles to instantiate:
 	 * either because the policy blocks, has no transformations or
 	 * we could not build template (no xfrm_states).*/
-	xdst = xfrm_create_dummy_bundle(net, xflo, fl, num_xfrms, family);
+	xdst = xfrm_create_dummy_bundle(net, dst_orig, fl, num_xfrms, family);
 	if (IS_ERR(xdst)) {
 		xfrm_pols_put(pols, num_pols);
 		return ERR_CAST(xdst);
@@ -2126,18 +2116,13 @@ restart:
 	}
 
 	if (xdst == NULL) {
-		struct xfrm_flo xflo;
-
-		xflo.dst_orig = dst_orig;
-		xflo.flags = flags;
-
 		/* To accelerate a bit...  */
 		if ((dst_orig->flags & DST_NOXFRM) ||
 		    !net->xfrm.policy_count[XFRM_POLICY_OUT])
 			goto nopol;
 
 		flo = flow_cache_lookup(net, fl, family, dir,
-					xfrm_bundle_lookup, &xflo);
+					xfrm_bundle_lookup, dst_orig);
 		if (flo == NULL)
 			goto nopol;
 		if (IS_ERR(flo)) {
@@ -2161,9 +2146,11 @@ restart:
 		 * have the xfrm_state's. We need to wait for KM to
 		 * negotiate new SA's or bail out with error.*/
 		if (net->xfrm.sysctl_larval_drop) {
+			dst_release(dst);
+			xfrm_pols_put(pols, drop_pols);
 			XFRM_INC_STATS(net, LINUX_MIB_XFRMOUTNOSTATES);
-			err = -EREMOTE;
-			goto error;
+
+			return make_blackhole(net, family, dst_orig);
 		}
 		if (fl->flowi_flags & FLOWI_FLAG_CAN_SLEEP) {
 			DECLARE_WAITQUEUE(wait, current);
@@ -2229,30 +2216,11 @@ nopol:
 error:
 	dst_release(dst);
 dropdst:
-	if (!(flags & XFRM_LOOKUP_KEEP_DST_REF))
-		dst_release(dst_orig);
+	dst_release(dst_orig);
 	xfrm_pols_put(pols, drop_pols);
 	return ERR_PTR(err);
 }
 EXPORT_SYMBOL(xfrm_lookup);
-
-/* Callers of xfrm_lookup_route() must ensure a call to dst_output().
- * Otherwise we may send out blackholed packets.
- */
-struct dst_entry *xfrm_lookup_route(struct net *net, struct dst_entry *dst_orig,
-				    const struct flowi *fl,
-				    struct sock *sk, int flags)
-{
-	struct dst_entry *dst = xfrm_lookup(net, dst_orig, fl, sk,
-					    flags | XFRM_LOOKUP_QUEUE |
-					    XFRM_LOOKUP_KEEP_DST_REF);
-
-	if (IS_ERR(dst) && PTR_ERR(dst) == -EREMOTE)
-		return make_blackhole(net, dst_orig->ops->family, dst_orig);
-
-	return dst;
-}
-EXPORT_SYMBOL(xfrm_lookup_route);
 
 static inline int
 xfrm_secpath_reject(int idx, struct sk_buff *skb, const struct flowi *fl)
@@ -2519,7 +2487,7 @@ int __xfrm_route_forward(struct sk_buff *skb, unsigned short family)
 
 	skb_dst_force(skb);
 
-	dst = xfrm_lookup(net, skb_dst(skb), &fl, NULL, XFRM_LOOKUP_QUEUE);
+	dst = xfrm_lookup(net, skb_dst(skb), &fl, NULL, 0);
 	if (IS_ERR(dst)) {
 		res = 0;
 		dst = NULL;

@@ -453,8 +453,8 @@ static int caam_jr_probe(struct platform_device *pdev)
 	int error;
 
 	jrdev = &pdev->dev;
-	jrpriv = devm_kmalloc(jrdev, sizeof(struct caam_drv_private_jr),
-			      GFP_KERNEL);
+	jrpriv = kmalloc(sizeof(struct caam_drv_private_jr),
+			 GFP_KERNEL);
 	if (!jrpriv)
 		return -ENOMEM;
 
@@ -487,8 +487,10 @@ static int caam_jr_probe(struct platform_device *pdev)
 
 	/* Now do the platform independent part */
 	error = caam_jr_init(jrdev); /* now turn on hardware */
-	if (error)
+	if (error) {
+		kfree(jrpriv);
 		return error;
+	}
 
 	jrpriv->dev = jrdev;
 	spin_lock(&driver_data.jr_alloc_lock);

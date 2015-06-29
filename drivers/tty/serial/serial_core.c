@@ -26,7 +26,6 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/console.h>
-#include <linux/of.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/device.h>
@@ -171,12 +170,8 @@ static int uart_port_startup(struct tty_struct *tty, struct uart_state *state,
 			if (tty->termios.c_cflag & CBAUD)
 				uart_set_mctrl(uport, TIOCM_RTS | TIOCM_DTR);
 		}
-		/*
-		 * if hw support flow control without software intervention,
-		 * then skip the below check
-		 */
-		if (tty_port_cts_enabled(port) &&
-		    !(uport->flags & UPF_HARD_FLOW)) {
+
+		if (tty_port_cts_enabled(port)) {
 			spin_lock_irq(&uport->lock);
 			if (!(uport->ops->get_mctrl(uport) & TIOCM_CTS))
 				tty->hw_stopped = 1;
@@ -240,9 +235,6 @@ static void uart_shutdown(struct tty_struct *tty, struct uart_state *state)
 		/*
 		 * Turn off DTR and RTS early.
 		 */
-		if (uart_console(uport) && tty)
-			uport->cons->cflag = tty->termios.c_cflag;
-
 		if (!tty || (tty->termios.c_cflag & HUPCL))
 			uart_clear_mctrl(uport, TIOCM_DTR | TIOCM_RTS);
 
@@ -358,7 +350,7 @@ uart_get_baud_rate(struct uart_port *port, struct ktermios *termios,
 		 * The spd_hi, spd_vhi, spd_shi, spd_warp kludge...
 		 * Die! Die! Die!
 		 */
-		if (try == 0 && baud == 38400)
+		if (baud == 38400)
 			baud = altbaud;
 
 		/*
@@ -2608,8 +2600,6 @@ int uart_add_one_port(struct uart_driver *drv, struct uart_port *uport)
 		spin_lock_init(&uport->lock);
 		lockdep_set_class(&uport->lock, &port_lock_key);
 	}
-	if (uport->cons && uport->dev)
-		of_console_check(uport->dev->of_node, uport->cons->name, uport->line);
 
 	uart_configure_port(drv, state, uport);
 
@@ -2764,9 +2754,7 @@ void uart_handle_cts_change(struct uart_port *uport, unsigned int status)
 
 	uport->icount.cts++;
 
-	/* skip below code if the hw flow control is supported */
-	if (tty_port_cts_enabled(port) &&
-	    !(uport->flags & UPF_HARD_FLOW)) {
+	if (tty_port_cts_enabled(port)) {
 		if (tty->hw_stopped) {
 			if (status) {
 				tty->hw_stopped = 0;

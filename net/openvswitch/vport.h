@@ -76,7 +76,6 @@ struct vport_err_stats {
  * @percpu_stats: Points to per-CPU statistics used and maintained by vport
  * @stats_lock: Protects @err_stats;
  * @err_stats: Points to error statistics used and maintained by vport
- * @detach_list: list used for detaching vport in net-exit call.
  */
 struct vport {
 	struct rcu_head rcu;
@@ -92,7 +91,6 @@ struct vport {
 
 	spinlock_t stats_lock;
 	struct vport_err_stats err_stats;
-	struct list_head detach_list;
 };
 
 /**

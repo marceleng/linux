@@ -102,8 +102,8 @@
 #define	CG_SPLL_FUNC_CNTL_4				0x60c
 
 #define	SPLL_CNTL_MODE					0x618
-#	define SPLL_REFCLK_SEL(x)			((x) << 26)
-#	define SPLL_REFCLK_SEL_MASK			(3 << 26)
+#	define SPLL_REFCLK_SEL(x)			((x) << 8)
+#	define SPLL_REFCLK_SEL_MASK			0xFF00
 
 #define	CG_SPLL_SPREAD_SPECTRUM				0x620
 #define		SSEN					(1 << 0)
@@ -1586,23 +1586,6 @@
 #define	PACKET3_MPEG_INDEX				0x3A
 #define	PACKET3_COPY_DW					0x3B
 #define	PACKET3_WAIT_REG_MEM				0x3C
-#define		WAIT_REG_MEM_FUNCTION(x)                ((x) << 0)
-                /* 0 - always
-		 * 1 - <
-		 * 2 - <=
-		 * 3 - ==
-		 * 4 - !=
-		 * 5 - >=
-		 * 6 - >
-		 */
-#define		WAIT_REG_MEM_MEM_SPACE(x)               ((x) << 4)
-                /* 0 - reg
-		 * 1 - mem
-		 */
-#define		WAIT_REG_MEM_ENGINE(x)                  ((x) << 8)
-                /* 0 - me
-		 * 1 - pfp
-		 */
 #define	PACKET3_MEM_WRITE				0x3D
 #define	PACKET3_COPY_DATA				0x40
 #define	PACKET3_CP_DMA					0x41
@@ -1806,7 +1789,6 @@
 #define	DMA_PACKET_TRAP					  0x7
 #define	DMA_PACKET_SRBM_WRITE				  0x9
 #define	DMA_PACKET_CONSTANT_FILL			  0xd
-#define	DMA_PACKET_POLL_REG_MEM				  0xe
 #define	DMA_PACKET_NOP					  0xf
 
 #endif

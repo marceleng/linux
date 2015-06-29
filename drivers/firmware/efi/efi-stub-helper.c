@@ -11,10 +11,6 @@
  */
 #define EFI_READ_CHUNK_SIZE	(1024 * 1024)
 
-/* error code which can't be mistaken for valid address */
-#define EFI_ERROR	(~0UL)
-
-
 struct file_info {
 	efi_file_handle_t *handle;
 	u64 size;
@@ -48,9 +44,6 @@ static void efi_printk(efi_system_table_t *sys_table_arg, char *str)
 		efi_char16_printk(sys_table_arg, ch);
 	}
 }
-
-#define pr_efi(sys_table, msg)     efi_printk(sys_table, "EFI stub: "msg)
-#define pr_efi_err(sys_table, msg) efi_printk(sys_table, "EFI stub: ERROR: "msg)
 
 
 static efi_status_t efi_get_memory_map(efi_system_table_t *sys_table_arg,
@@ -140,11 +133,11 @@ again:
 		start = desc->phys_addr;
 		end = start + desc->num_pages * (1UL << EFI_PAGE_SHIFT);
 
-		if (end > max)
-			end = max;
-
-		if ((start + size) > end)
+		if ((start + size) > end || (start + size) > max)
 			continue;
+
+		if (end - size > max)
+			end = max;
 
 		if (round_down(end - size, align) < start)
 			continue;

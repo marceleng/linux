@@ -426,18 +426,20 @@ static int brcms_ops_start(struct ieee80211_hw *hw)
 	bool blocked;
 	int err;
 
-	if (!wl->ucode.bcm43xx_bomminor) {
-		err = brcms_request_fw(wl, wl->wlc->hw->d11core);
-		if (err)
-			return -ENOENT;
-	}
-
 	ieee80211_wake_queues(hw);
 	spin_lock_bh(&wl->lock);
 	blocked = brcms_rfkill_set_hw_state(wl);
 	spin_unlock_bh(&wl->lock);
 	if (!blocked)
 		wiphy_rfkill_stop_polling(wl->pub->ieee_hw->wiphy);
+
+	if (!wl->ucode.bcm43xx_bomminor) {
+		err = brcms_request_fw(wl, wl->wlc->hw->d11core);
+		if (err) {
+			brcms_remove(wl->wlc->hw->d11core);
+			return -ENOENT;
+		}
+	}
 
 	spin_lock_bh(&wl->lock);
 	/* avoid acknowledging frames before a non-monitor device is added */
@@ -897,8 +899,7 @@ static bool brcms_tx_flush_completed(struct brcms_info *wl)
 	return result;
 }
 
-static void brcms_ops_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-			    u32 queues, bool drop)
+static void brcms_ops_flush(struct ieee80211_hw *hw, u32 queues, bool drop)
 {
 	struct brcms_info *wl = hw->priv;
 	int ret;

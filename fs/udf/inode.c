@@ -51,6 +51,7 @@ MODULE_LICENSE("GPL");
 
 static umode_t udf_convert_permissions(struct fileEntry *);
 static int udf_update_inode(struct inode *, int);
+static void udf_fill_inode(struct inode *, struct buffer_head *);
 static int udf_sync_inode(struct inode *inode);
 static int udf_alloc_i_data(struct inode *inode, size_t size);
 static sector_t inode_getblk(struct inode *, sector_t, int *, int *);
@@ -1269,26 +1270,13 @@ update_time:
 	return 0;
 }
 
-/*
- * Maximum length of linked list formed by ICB hierarchy. The chosen number is
- * arbitrary - just that we hopefully don't limit any real use of rewritten
- * inode on write-once media but avoid looping for too long on corrupted media.
- */
-#define UDF_MAX_ICB_NESTING 1024
-
 static void __udf_read_inode(struct inode *inode)
 {
 	struct buffer_head *bh = NULL;
 	struct fileEntry *fe;
-	struct extendedFileEntry *efe;
 	uint16_t ident;
 	struct udf_inode_info *iinfo = UDF_I(inode);
-	struct udf_sb_info *sbi = UDF_SB(inode->i_sb);
-	unsigned int link_count;
-	unsigned int indirections = 0;
-	int bs = inode->i_sb->s_blocksize;
 
-reread:
 	/*
 	 * Set defaults, but the inode is still incomplete!
 	 * Note: get_new_inode() sets the following on a new inode:
@@ -1318,7 +1306,6 @@ reread:
 	}
 
 	fe = (struct fileEntry *)bh->b_data;
-	efe = (struct extendedFileEntry *)bh->b_data;
 
 	if (fe->icbTag.strategyType == cpu_to_le16(4096)) {
 		struct buffer_head *ibh;
@@ -1326,26 +1313,28 @@ reread:
 		ibh = udf_read_ptagged(inode->i_sb, &iinfo->i_location, 1,
 					&ident);
 		if (ident == TAG_IDENT_IE && ibh) {
+			struct buffer_head *nbh = NULL;
 			struct kernel_lb_addr loc;
 			struct indirectEntry *ie;
 
 			ie = (struct indirectEntry *)ibh->b_data;
 			loc = lelb_to_cpu(ie->indirectICB.extLocation);
 
-			if (ie->indirectICB.extLength) {
-				brelse(bh);
-				brelse(ibh);
-				memcpy(&iinfo->i_location, &loc,
-				       sizeof(struct kernel_lb_addr));
-				if (++indirections > UDF_MAX_ICB_NESTING) {
-					udf_err(inode->i_sb,
-						"too many ICBs in ICB hierarchy"
-						" (max %d supported)\n",
-						UDF_MAX_ICB_NESTING);
-					make_bad_inode(inode);
+			if (ie->indirectICB.extLength &&
+				(nbh = udf_read_ptagged(inode->i_sb, &loc, 0,
+							&ident))) {
+				if (ident == TAG_IDENT_FE ||
+					ident == TAG_IDENT_EFE) {
+					memcpy(&iinfo->i_location,
+						&loc,
+						sizeof(struct kernel_lb_addr));
+					brelse(bh);
+					brelse(ibh);
+					brelse(nbh);
+					__udf_read_inode(inode);
 					return;
 				}
-				goto reread;
+				brelse(nbh);
 			}
 		}
 		brelse(ibh);
@@ -1356,6 +1345,22 @@ reread:
 		make_bad_inode(inode);
 		return;
 	}
+	udf_fill_inode(inode, bh);
+
+	brelse(bh);
+}
+
+static void udf_fill_inode(struct inode *inode, struct buffer_head *bh)
+{
+	struct fileEntry *fe;
+	struct extendedFileEntry *efe;
+	struct udf_sb_info *sbi = UDF_SB(inode->i_sb);
+	struct udf_inode_info *iinfo = UDF_I(inode);
+	unsigned int link_count;
+
+	fe = (struct fileEntry *)bh->b_data;
+	efe = (struct extendedFileEntry *)bh->b_data;
+
 	if (fe->icbTag.strategyType == cpu_to_le16(4))
 		iinfo->i_strat4096 = 0;
 	else /* if (fe->icbTag.strategyType == cpu_to_le16(4096)) */
@@ -1372,38 +1377,41 @@ reread:
 	if (fe->descTag.tagIdent == cpu_to_le16(TAG_IDENT_EFE)) {
 		iinfo->i_efe = 1;
 		iinfo->i_use = 0;
-		if (udf_alloc_i_data(inode, bs -
+		if (udf_alloc_i_data(inode, inode->i_sb->s_blocksize -
 					sizeof(struct extendedFileEntry))) {
 			make_bad_inode(inode);
 			return;
 		}
 		memcpy(iinfo->i_ext.i_data,
 		       bh->b_data + sizeof(struct extendedFileEntry),
-		       bs - sizeof(struct extendedFileEntry));
+		       inode->i_sb->s_blocksize -
+					sizeof(struct extendedFileEntry));
 	} else if (fe->descTag.tagIdent == cpu_to_le16(TAG_IDENT_FE)) {
 		iinfo->i_efe = 0;
 		iinfo->i_use = 0;
-		if (udf_alloc_i_data(inode, bs - sizeof(struct fileEntry))) {
+		if (udf_alloc_i_data(inode, inode->i_sb->s_blocksize -
+						sizeof(struct fileEntry))) {
 			make_bad_inode(inode);
 			return;
 		}
 		memcpy(iinfo->i_ext.i_data,
 		       bh->b_data + sizeof(struct fileEntry),
-		       bs - sizeof(struct fileEntry));
+		       inode->i_sb->s_blocksize - sizeof(struct fileEntry));
 	} else if (fe->descTag.tagIdent == cpu_to_le16(TAG_IDENT_USE)) {
 		iinfo->i_efe = 0;
 		iinfo->i_use = 1;
 		iinfo->i_lenAlloc = le32_to_cpu(
 				((struct unallocSpaceEntry *)bh->b_data)->
 				 lengthAllocDescs);
-		if (udf_alloc_i_data(inode, bs -
+		if (udf_alloc_i_data(inode, inode->i_sb->s_blocksize -
 					sizeof(struct unallocSpaceEntry))) {
 			make_bad_inode(inode);
 			return;
 		}
 		memcpy(iinfo->i_ext.i_data,
 		       bh->b_data + sizeof(struct unallocSpaceEntry),
-		       bs - sizeof(struct unallocSpaceEntry));
+		       inode->i_sb->s_blocksize -
+					sizeof(struct unallocSpaceEntry));
 		return;
 	}
 
@@ -1480,36 +1488,6 @@ reread:
 		iinfo->i_checkpoint = le32_to_cpu(efe->checkpoint);
 	}
 
-	/*
-	 * Sanity check length of allocation descriptors and extended attrs to
-	 * avoid integer overflows
-	 */
-	if (iinfo->i_lenEAttr > bs || iinfo->i_lenAlloc > bs) {
-		make_bad_inode(inode);
-		return;
-	}
-	/* Now do exact checks */
-	if (udf_file_entry_alloc_offset(inode) + iinfo->i_lenAlloc > bs) {
-		make_bad_inode(inode);
-		return;
-	}
-	/* Sanity checks for files in ICB so that we don't get confused later */
-	if (iinfo->i_alloc_type == ICBTAG_FLAG_AD_IN_ICB) {
-		/*
-		 * For file in ICB data is stored in allocation descriptor
-		 * so sizes should match
-		 */
-		if (iinfo->i_lenAlloc != inode->i_size) {
-			make_bad_inode(inode);
-			return;
-		}
-		/* File in ICB has to fit in there... */
-		if (inode->i_size > bs - udf_file_entry_alloc_offset(inode)) {
-			make_bad_inode(inode);
-			return;
-		}
-	}
-
 	switch (fe->icbTag.fileType) {
 	case ICBTAG_FILE_TYPE_DIRECTORY:
 		inode->i_op = &udf_dir_inode_operations;
@@ -1572,7 +1550,6 @@ reread:
 		} else
 			make_bad_inode(inode);
 	}
-	brelse(bh);
 }
 
 static int udf_alloc_i_data(struct inode *inode, size_t size)

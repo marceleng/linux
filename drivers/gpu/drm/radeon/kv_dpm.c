@@ -1121,19 +1121,6 @@ void kv_dpm_enable_bapm(struct radeon_device *rdev, bool enable)
 	}
 }
 
-static void kv_enable_thermal_int(struct radeon_device *rdev, bool enable)
-{
-	u32 thermal_int;
-
-	thermal_int = RREG32_SMC(CG_THERMAL_INT_CTRL);
-	if (enable)
-		thermal_int |= THERM_INTH_MASK | THERM_INTL_MASK;
-	else
-		thermal_int &= ~(THERM_INTH_MASK | THERM_INTL_MASK);
-	WREG32_SMC(CG_THERMAL_INT_CTRL, thermal_int);
-
-}
-
 int kv_dpm_enable(struct radeon_device *rdev)
 {
 	struct kv_power_info *pi = kv_get_pi(rdev);
@@ -1235,7 +1222,8 @@ int kv_dpm_enable(struct radeon_device *rdev)
 			DRM_ERROR("kv_set_thermal_temperature_range failed\n");
 			return ret;
 		}
-		kv_enable_thermal_int(rdev, true);
+		rdev->irq.dpm_thermal = true;
+		radeon_irq_set(rdev);
 	}
 
 	ret = kv_smc_bapm_enable(rdev, false);
@@ -1281,7 +1269,6 @@ void kv_dpm_disable(struct radeon_device *rdev)
 	kv_stop_dpm(rdev);
 	kv_enable_ulv(rdev, false);
 	kv_reset_am(rdev);
-	kv_enable_thermal_int(rdev, false);
 
 	kv_update_current_ps(rdev, rdev->pm.dpm.boot_ps);
 }
@@ -2633,11 +2620,7 @@ int kv_dpm_init(struct radeon_device *rdev)
 	if (rdev->family == CHIP_KABINI)
 		pi->high_voltage_t = 4001;
 
-	/* Enabling nb dpm on an asrock system prevents dpm from working */
-	if (rdev->pdev->subsystem_vendor == 0x1849)
-		pi->enable_nb_dpm = false;
-	else
-		pi->enable_nb_dpm = true;
+	pi->enable_nb_dpm = true;
 
 	pi->caps_power_containment = true;
 	pi->caps_cac = true;
@@ -2652,19 +2635,7 @@ int kv_dpm_init(struct radeon_device *rdev)
 	pi->caps_sclk_ds = true;
 	pi->enable_auto_thermal_throttling = true;
 	pi->disable_nb_ps3_in_battery = false;
-	if (radeon_bapm == -1) {
-		/* There are stability issues reported on with
-		 * bapm enabled on an asrock system.
-		 */
-		if (rdev->pdev->subsystem_vendor == 0x1849)
-			pi->bapm_enable = false;
-		else
-			pi->bapm_enable = true;
-	} else if (radeon_bapm == 0) {
-		pi->bapm_enable = false;
-	} else {
-		pi->bapm_enable = true;
-	}
+	pi->bapm_enable = false;
 	pi->voltage_drop_t = 0;
 	pi->caps_sclk_throttle_low_notification = false;
 	pi->caps_fps = false; /* true? */

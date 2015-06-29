@@ -346,7 +346,7 @@ void __mlx4_mpt_release(struct mlx4_dev *dev, u32 index)
 {
 	struct mlx4_priv *priv = mlx4_priv(dev);
 
-	mlx4_bitmap_free(&priv->mr_table.mpt_bitmap, index, MLX4_NO_RR);
+	mlx4_bitmap_free(&priv->mr_table.mpt_bitmap, index);
 }
 
 static void mlx4_mpt_release(struct mlx4_dev *dev, u32 index)
@@ -991,7 +991,7 @@ EXPORT_SYMBOL_GPL(mlx4_fmr_free);
 
 int mlx4_SYNC_TPT(struct mlx4_dev *dev)
 {
-	return mlx4_cmd(dev, 0, 0, 0, MLX4_CMD_SYNC_TPT,
-			MLX4_CMD_TIME_CLASS_A, MLX4_CMD_NATIVE);
+	return mlx4_cmd(dev, 0, 0, 0, MLX4_CMD_SYNC_TPT, 1000,
+			MLX4_CMD_NATIVE);
 }
 EXPORT_SYMBOL_GPL(mlx4_SYNC_TPT);

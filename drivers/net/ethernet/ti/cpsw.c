@@ -33,8 +33,6 @@
 #include <linux/of_net.h>
 #include <linux/of_device.h>
 #include <linux/if_vlan.h>
-#include <linux/mfd/syscon.h>
-#include <linux/regmap.h>
 
 #include <linux/pinctrl/consumer.h>
 
@@ -639,14 +637,6 @@ void cpsw_rx_handler(void *token, int len, int status)
 static irqreturn_t cpsw_interrupt(int irq, void *dev_id)
 {
 	struct cpsw_priv *priv = dev_id;
-	int value = irq - priv->irqs_table[0];
-
-	/* NOTICE: Ending IRQ here. The trick with the 'value' variable above
-	 * is to make sure we will always write the correct value to the EOI
-	 * register. Namely 0 for RX_THRESH Interrupt, 1 for RX Interrupt, 2
-	 * for TX Interrupt and 3 for MISC Interrupt.
-	 */
-	cpdma_ctlr_eoi(priv->dma, value);
 
 	cpsw_intr_disable(priv);
 	if (priv->irq_enabled == true) {
@@ -676,6 +666,8 @@ static int cpsw_poll(struct napi_struct *napi, int budget)
 	int			num_tx, num_rx;
 
 	num_tx = cpdma_chan_process(priv->txch, 128);
+	if (num_tx)
+		cpdma_ctlr_eoi(priv->dma, CPDMA_EOI_TX);
 
 	num_rx = cpdma_chan_process(priv->rxch, budget);
 	if (num_rx < budget) {
@@ -683,6 +675,7 @@ static int cpsw_poll(struct napi_struct *napi, int budget)
 
 		napi_complete(napi);
 		cpsw_intr_enable(priv);
+		cpdma_ctlr_eoi(priv->dma, CPDMA_EOI_RX);
 		prim_cpsw = cpsw_get_slave_priv(priv, 0);
 		if (prim_cpsw->irq_enabled == false) {
 			prim_cpsw->irq_enabled = true;
@@ -1176,10 +1169,6 @@ static int cpsw_ndo_open(struct net_device *ndev)
 		cpsw_set_coalesce(ndev, &coal);
 	}
 
-	napi_enable(&priv->napi);
-	cpdma_ctlr_start(priv->dma);
-	cpsw_intr_enable(priv);
-
 	prim_cpsw = cpsw_get_slave_priv(priv, 0);
 	if (prim_cpsw->irq_enabled == false) {
 		if ((priv == prim_cpsw) || !netif_running(prim_cpsw->ndev)) {
@@ -1187,6 +1176,12 @@ static int cpsw_ndo_open(struct net_device *ndev)
 			cpsw_enable_irq(prim_cpsw);
 		}
 	}
+
+	napi_enable(&priv->napi);
+	cpdma_ctlr_start(priv->dma);
+	cpsw_intr_enable(priv);
+	cpdma_ctlr_eoi(priv->dma, CPDMA_EOI_RX);
+	cpdma_ctlr_eoi(priv->dma, CPDMA_EOI_TX);
 
 	if (priv->data.dual_emac)
 		priv->slaves[priv->emac_port].open_stat = true;
@@ -1435,6 +1430,9 @@ static void cpsw_ndo_tx_timeout(struct net_device *ndev)
 	cpdma_chan_start(priv->txch);
 	cpdma_ctlr_int_ctrl(priv->dma, true);
 	cpsw_intr_enable(priv);
+	cpdma_ctlr_eoi(priv->dma, CPDMA_EOI_RX);
+	cpdma_ctlr_eoi(priv->dma, CPDMA_EOI_TX);
+
 }
 
 static int cpsw_ndo_set_mac_address(struct net_device *ndev, void *p)
@@ -1480,6 +1478,9 @@ static void cpsw_ndo_poll_controller(struct net_device *ndev)
 	cpsw_interrupt(ndev->irq, priv);
 	cpdma_ctlr_int_ctrl(priv->dma, true);
 	cpsw_intr_enable(priv);
+	cpdma_ctlr_eoi(priv->dma, CPDMA_EOI_RX);
+	cpdma_ctlr_eoi(priv->dma, CPDMA_EOI_TX);
+
 }
 #endif
 
@@ -1523,19 +1524,6 @@ static int cpsw_ndo_vlan_rx_add_vid(struct net_device *ndev,
 	if (vid == priv->data.default_vlan)
 		return 0;
 
-	if (priv->data.dual_emac) {
-		/* In dual EMAC, reserved VLAN id should not be used for
-		 * creating VLAN interfaces as this can break the dual
-		 * EMAC port separation
-		 */
-		int i;
-
-		for (i = 0; i < priv->data.slaves; i++) {
-			if (vid == priv->slaves[i].port_vlan)
-				return -EINVAL;
-		}
-	}
-
 	dev_info(priv->dev, "Adding vlanid %d to vlan filter\n", vid);
 	return cpsw_add_vlan_ale_entry(priv, vid);
 }
@@ -1548,15 +1536,6 @@ static int cpsw_ndo_vlan_rx_kill_vid(struct net_device *ndev,
 
 	if (vid == priv->data.default_vlan)
 		return 0;
-
-	if (priv->data.dual_emac) {
-		int i;
-
-		for (i = 0; i < priv->data.slaves; i++) {
-			if (vid == priv->slaves[i].port_vlan)
-				return -EINVAL;
-		}
-	}
 
 	dev_info(priv->dev, "removing vlanid %d from vlan filter\n", vid);
 	ret = cpsw_ale_del_vlan(priv->ale, vid, 0);
@@ -1721,36 +1700,6 @@ static void cpsw_slave_init(struct cpsw_slave *slave, struct cpsw_priv *priv,
 	slave->port_vlan = data->dual_emac_res_vlan;
 }
 
-#define AM33XX_CTRL_MAC_LO_REG(id) (0x630 + 0x8 * id)
-#define AM33XX_CTRL_MAC_HI_REG(id) (0x630 + 0x8 * id + 0x4)
-
-static int cpsw_am33xx_cm_get_macid(struct device *dev, int slave,
-		u8 *mac_addr)
-{
-	u32 macid_lo;
-	u32 macid_hi;
-	struct regmap *syscon;
-
-	syscon = syscon_regmap_lookup_by_phandle(dev->of_node, "syscon");
-	if (IS_ERR(syscon)) {
-		if (PTR_ERR(syscon) == -ENODEV)
-			return 0;
-		return PTR_ERR(syscon);
-	}
-
-	regmap_read(syscon, AM33XX_CTRL_MAC_LO_REG(slave), &macid_lo);
-	regmap_read(syscon, AM33XX_CTRL_MAC_HI_REG(slave), &macid_hi);
-
-	mac_addr[5] = (macid_lo >> 8) & 0xff;
-	mac_addr[4] = macid_lo & 0xff;
-	mac_addr[3] = (macid_hi >> 24) & 0xff;
-	mac_addr[2] = (macid_hi >> 16) & 0xff;
-	mac_addr[1] = (macid_hi >> 8) & 0xff;
-	mac_addr[0] = macid_hi & 0xff;
-
-	return 0;
-}
-
 static int cpsw_probe_dt(struct cpsw_platform_data *data,
 			 struct platform_device *pdev)
 {
@@ -1858,16 +1807,8 @@ static int cpsw_probe_dt(struct cpsw_platform_data *data,
 			 PHY_ID_FMT, mdio->name, phyid);
 
 		mac_addr = of_get_mac_address(slave_node);
-		if (mac_addr) {
+		if (mac_addr)
 			memcpy(slave_data->mac_addr, mac_addr, ETH_ALEN);
-		} else {
-			if (of_machine_is_compatible("ti,am33xx")) {
-				ret = cpsw_am33xx_cm_get_macid(&pdev->dev, i,
-							slave_data->mac_addr);
-				if (ret)
-					return ret;
-			}
-		}
 
 		slave_data->phy_if = of_get_phy_mode(slave_node);
 
@@ -1996,7 +1937,6 @@ static int cpsw_probe(struct platform_device *pdev)
 	priv->irq_enabled = true;
 	if (!priv->cpts) {
 		pr_err("error allocating cpts\n");
-		ret = -ENOMEM;
 		goto clean_ndev_ret;
 	}
 
@@ -2192,6 +2132,10 @@ static int cpsw_probe(struct platform_device *pdev)
 		ret = -ENODEV;
 		goto clean_ale_ret;
 	}
+
+	if (cpts_register(&pdev->dev, priv->cpts,
+			  data->cpts_clock_mult, data->cpts_clock_shift))
+		dev_err(priv->dev, "error registering cpts device\n");
 
 	cpsw_notice(priv, probe, "initialized device (regs %x, irq %d)\n",
 		    ss_res->start, ndev->irq);

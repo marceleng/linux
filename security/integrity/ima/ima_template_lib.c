@@ -109,16 +109,13 @@ static void ima_show_template_data_binary(struct seq_file *m,
 					  enum data_formats datafmt,
 					  struct ima_field_data *field_data)
 {
-	u32 len = (show == IMA_SHOW_BINARY_OLD_STRING_FMT) ?
-	    strlen(field_data->data) : field_data->len;
-
 	if (show != IMA_SHOW_BINARY_NO_FIELD_LEN)
-		ima_putc(m, &len, sizeof(len));
+		ima_putc(m, &field_data->len, sizeof(u32));
 
-	if (!len)
+	if (!field_data->len)
 		return;
 
-	ima_putc(m, field_data->data, len);
+	ima_putc(m, field_data->data, field_data->len);
 }
 
 static void ima_show_template_field_data(struct seq_file *m,
@@ -132,7 +129,6 @@ static void ima_show_template_field_data(struct seq_file *m,
 		break;
 	case IMA_SHOW_BINARY:
 	case IMA_SHOW_BINARY_NO_FIELD_LEN:
-	case IMA_SHOW_BINARY_OLD_STRING_FMT:
 		ima_show_template_data_binary(m, show, datafmt, field_data);
 		break;
 	default:

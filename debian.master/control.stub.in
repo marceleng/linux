@@ -76,8 +76,7 @@ Multi-Arch: foreign
 Section: kernel
 Priority: optional
 Depends: ${misc:Depends}
-Conflicts: linux-lts-utopic-tools-common, linux-lts-vivid-tools-common
-Replaces: SRCPKGNAME-tools (<= 2.6.32-16.25), linux-lts-utopic-tools-common, linux-lts-vivid-tools-common
+Replaces: SRCPKGNAME-tools (<= 2.6.32-16.25)
 Description: Linux kernel version specific tools for version PKGVER
  This package provides the architecture independent parts for kernel
  version locked tools (such as perf and x86_energy_perf_policy) for
@@ -101,8 +100,7 @@ Multi-Arch: foreign
 Section: kernel
 Priority: optional
 Breaks: SRCPKGNAME-tools-common (<< 3.13.0-8.28), hv-kvp-daemon-init (<< 3.13)
-Conflicts: linux-lts-utopic-cloud-tools-common, linux-lts-vivid-cloud-tools-common
-Replaces: SRCPKGNAME-tools-common (<< 3.13.0-8.28), hv-kvp-daemon-init (<< 3.13), linux-lts-utopic-cloud-tools-common, linux-lts-vivid-cloud-tools-common
+Replaces: SRCPKGNAME-tools-common (<< 3.13.0-8.28), hv-kvp-daemon-init (<< 3.13)
 Depends: ${misc:Depends}
 Description: Linux kernel version specific cloud tools for version PKGVER
  This package provides the architecture independent parts for kernel

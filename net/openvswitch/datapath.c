@@ -585,9 +585,9 @@ static void get_dp_stats(struct datapath *dp, struct ovs_dp_stats *stats,
 		percpu_stats = per_cpu_ptr(dp->stats_percpu, i);
 
 		do {
-			start = u64_stats_fetch_begin_irq(&percpu_stats->sync);
+			start = u64_stats_fetch_begin_bh(&percpu_stats->sync);
 			local_stats = *percpu_stats;
-		} while (u64_stats_fetch_retry_irq(&percpu_stats->sync, start));
+		} while (u64_stats_fetch_retry_bh(&percpu_stats->sync, start));
 
 		stats->n_hit += local_stats.n_hit;
 		stats->n_missed += local_stats.n_missed;
@@ -701,7 +701,8 @@ static int ovs_flow_cmd_fill_info(struct sw_flow *flow, struct datapath *dp,
 	if (start) {
 		const struct sw_flow_actions *sf_acts;
 
-		sf_acts = rcu_dereference_ovsl(flow->sf_acts);
+		sf_acts = rcu_dereference_check(flow->sf_acts,
+						lockdep_ovsl_is_held());
 
 		err = ovs_nla_put_actions(sf_acts->actions,
 					  sf_acts->actions_len, skb);
@@ -852,12 +853,10 @@ static int ovs_flow_cmd_new_or_set(struct sk_buff *skb, struct genl_info *info)
 			goto err_unlock_ovs;
 
 		/* The unmasked key has to be the same for flow updates. */
+		error = -EINVAL;
 		if (!ovs_flow_cmp_unmasked_key(flow, &match)) {
-			flow = ovs_flow_tbl_lookup_exact(&dp->table, &match);
-			if (!flow) {
-				error = -ENOENT;
-				goto err_unlock_ovs;
-			}
+			OVS_NLERR("Flow modification message rejected, unmasked key does not match.\n");
+			goto err_unlock_ovs;
 		}
 
 		/* Update actions. */
@@ -875,7 +874,6 @@ static int ovs_flow_cmd_new_or_set(struct sk_buff *skb, struct genl_info *info)
 			spin_unlock_bh(&flow->lock);
 		}
 	}
-
 	ovs_unlock();
 
 	if (!IS_ERR(reply))
@@ -923,8 +921,8 @@ static int ovs_flow_cmd_get(struct sk_buff *skb, struct genl_info *info)
 		goto unlock;
 	}
 
-	flow = ovs_flow_tbl_lookup_exact(&dp->table, &match);
-	if (!flow) {
+	flow = __ovs_flow_tbl_lookup(&dp->table, &key);
+	if (!flow || !ovs_flow_cmp_unmasked_key(flow, &match)) {
 		err = -ENOENT;
 		goto unlock;
 	}
@@ -971,8 +969,8 @@ static int ovs_flow_cmd_del(struct sk_buff *skb, struct genl_info *info)
 	if (err)
 		goto unlock;
 
-	flow = ovs_flow_tbl_lookup_exact(&dp->table, &match);
-	if (unlikely(!flow)) {
+	flow = __ovs_flow_tbl_lookup(&dp->table, &key);
+	if (!flow || !ovs_flow_cmp_unmasked_key(flow, &match)) {
 		err = -ENOENT;
 		goto unlock;
 	}
@@ -1851,55 +1849,14 @@ static int __net_init ovs_init_net(struct net *net)
 	return 0;
 }
 
-static void __net_exit list_vports_from_net(struct net *net, struct net *dnet,
-					    struct list_head *head)
-{
-	struct ovs_net *ovs_net = net_generic(net, ovs_net_id);
-	struct datapath *dp;
-
-	list_for_each_entry(dp, &ovs_net->dps, list_node) {
-		int i;
-
-		for (i = 0; i < DP_VPORT_HASH_BUCKETS; i++) {
-			struct vport *vport;
-
-			hlist_for_each_entry(vport, &dp->ports[i], dp_hash_node) {
-				struct netdev_vport *netdev_vport;
-
-				if (vport->ops->type != OVS_VPORT_TYPE_INTERNAL)
-					continue;
-
-				netdev_vport = netdev_vport_priv(vport);
-				if (dev_net(netdev_vport->dev) == dnet)
-					list_add(&vport->detach_list, head);
-			}
-		}
-	}
-}
-
-static void __net_exit ovs_exit_net(struct net *dnet)
+static void __net_exit ovs_exit_net(struct net *net)
 {
 	struct datapath *dp, *dp_next;
-	struct ovs_net *ovs_net = net_generic(dnet, ovs_net_id);
-	struct vport *vport, *vport_next;
-	struct net *net;
-	LIST_HEAD(head);
+	struct ovs_net *ovs_net = net_generic(net, ovs_net_id);
 
 	ovs_lock();
 	list_for_each_entry_safe(dp, dp_next, &ovs_net->dps, list_node)
 		__dp_destroy(dp);
-
-	rtnl_lock();
-	for_each_net(net)
-		list_vports_from_net(net, dnet, &head);
-	rtnl_unlock();
-
-	/* Detach all vports from given namespace. */
-	list_for_each_entry_safe(vport, vport_next, &head, detach_list) {
-		list_del(&vport->detach_list);
-		ovs_dp_detach_port(vport);
-	}
-
 	ovs_unlock();
 
 	cancel_work_sync(&ovs_net->dp_notify_work);

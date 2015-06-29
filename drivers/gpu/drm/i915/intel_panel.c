@@ -544,7 +544,6 @@ void intel_panel_set_backlight(struct intel_connector *connector, u32 level,
 	enum pipe pipe = intel_get_pipe_from_connector(connector);
 	u32 freq;
 	unsigned long flags;
-	u64 n;
 
 	if (pipe == INVALID_PIPE)
 		return;
@@ -558,9 +557,10 @@ void intel_panel_set_backlight(struct intel_connector *connector, u32 level,
 	}
 
 	/* scale to hardware, but be careful to not overflow */
-	n = (u64)level * freq;
-	do_div(n, max);
-	level = n;
+	if (freq < max)
+		level = level * freq / max;
+	else
+		level = freq / max * level;
 
 	dev_priv->backlight.level = level;
 	if (dev_priv->backlight.device)

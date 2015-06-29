@@ -259,7 +259,7 @@ parse_lfp_panel_data(struct drm_i915_private *dev_priv,
 			downclock = dvo_timing->clock;
 	}
 
-	if (downclock < panel_dvo_timing->clock && i915.lvds_downclock) {
+	if (downclock < panel_dvo_timing->clock && i915_lvds_downclock) {
 		dev_priv->lvds_downclock_avail = 1;
 		dev_priv->lvds_downclock = downclock * 10;
 		DRM_DEBUG_KMS("LVDS downclock is found in VBT. "
@@ -299,21 +299,13 @@ parse_lfp_backlight(struct drm_i915_private *dev_priv, struct bdb_header *bdb)
 
 	entry = &backlight_data->data[panel_type];
 
-	dev_priv->vbt.backlight.present = entry->type == BDB_BACKLIGHT_TYPE_PWM;
-	if (!dev_priv->vbt.backlight.present) {
-		DRM_DEBUG_KMS("PWM backlight not present in VBT (type %u)\n",
-			      entry->type);
-		return;
-	}
-
 	dev_priv->vbt.backlight.pwm_freq_hz = entry->pwm_freq_hz;
 	dev_priv->vbt.backlight.active_low_pwm = entry->active_low_pwm;
-	dev_priv->vbt.backlight.min_brightness = entry->min_brightness;
 	DRM_DEBUG_KMS("VBT backlight PWM modulation frequency %u Hz, "
 		      "active %s, min brightness %u, level %u\n",
 		      dev_priv->vbt.backlight.pwm_freq_hz,
 		      dev_priv->vbt.backlight.active_low_pwm ? "low" : "high",
-		      dev_priv->vbt.backlight.min_brightness,
+		      entry->min_brightness,
 		      backlight_data->level[panel_type]);
 }
 
@@ -326,7 +318,7 @@ parse_sdvo_panel_data(struct drm_i915_private *dev_priv,
 	struct drm_display_mode *panel_fixed_mode;
 	int index;
 
-	index = i915.vbt_sdvo_panel_type;
+	index = i915_vbt_sdvo_panel_type;
 	if (index == -2) {
 		DRM_DEBUG_KMS("Ignore SDVO panel mode from BIOS VBT tables.\n");
 		return;
@@ -558,70 +550,46 @@ parse_edp(struct drm_i915_private *dev_priv, struct bdb_header *bdb)
 
 	dev_priv->vbt.edp_pps = *edp_pps;
 
-	switch (edp_link_params->rate) {
-	case EDP_RATE_1_62:
-		dev_priv->vbt.edp_rate = DP_LINK_BW_1_62;
-		break;
-	case EDP_RATE_2_7:
-		dev_priv->vbt.edp_rate = DP_LINK_BW_2_7;
-		break;
-	default:
-		DRM_DEBUG_KMS("VBT has unknown eDP link rate value %u\n",
-			      edp_link_params->rate);
-		break;
-	}
-
+	dev_priv->vbt.edp_rate = edp_link_params->rate ? DP_LINK_BW_2_7 :
+		DP_LINK_BW_1_62;
 	switch (edp_link_params->lanes) {
-	case EDP_LANE_1:
+	case 0:
 		dev_priv->vbt.edp_lanes = 1;
 		break;
-	case EDP_LANE_2:
+	case 1:
 		dev_priv->vbt.edp_lanes = 2;
 		break;
-	case EDP_LANE_4:
+	case 3:
+	default:
 		dev_priv->vbt.edp_lanes = 4;
 		break;
-	default:
-		DRM_DEBUG_KMS("VBT has unknown eDP lane count value %u\n",
-			      edp_link_params->lanes);
-		break;
 	}
-
 	switch (edp_link_params->preemphasis) {
-	case EDP_PREEMPHASIS_NONE:
+	case 0:
 		dev_priv->vbt.edp_preemphasis = DP_TRAIN_PRE_EMPHASIS_0;
 		break;
-	case EDP_PREEMPHASIS_3_5dB:
+	case 1:
 		dev_priv->vbt.edp_preemphasis = DP_TRAIN_PRE_EMPHASIS_3_5;
 		break;
-	case EDP_PREEMPHASIS_6dB:
+	case 2:
 		dev_priv->vbt.edp_preemphasis = DP_TRAIN_PRE_EMPHASIS_6;
 		break;
-	case EDP_PREEMPHASIS_9_5dB:
+	case 3:
 		dev_priv->vbt.edp_preemphasis = DP_TRAIN_PRE_EMPHASIS_9_5;
 		break;
-	default:
-		DRM_DEBUG_KMS("VBT has unknown eDP pre-emphasis value %u\n",
-			      edp_link_params->preemphasis);
-		break;
 	}
-
 	switch (edp_link_params->vswing) {
-	case EDP_VSWING_0_4V:
+	case 0:
 		dev_priv->vbt.edp_vswing = DP_TRAIN_VOLTAGE_SWING_400;
 		break;
-	case EDP_VSWING_0_6V:
+	case 1:
 		dev_priv->vbt.edp_vswing = DP_TRAIN_VOLTAGE_SWING_600;
 		break;
-	case EDP_VSWING_0_8V:
+	case 2:
 		dev_priv->vbt.edp_vswing = DP_TRAIN_VOLTAGE_SWING_800;
 		break;
-	case EDP_VSWING_1_2V:
+	case 3:
 		dev_priv->vbt.edp_vswing = DP_TRAIN_VOLTAGE_SWING_1200;
-		break;
-	default:
-		DRM_DEBUG_KMS("VBT has unknown eDP voltage swing value %u\n",
-			      edp_link_params->vswing);
 		break;
 	}
 }
@@ -631,14 +599,14 @@ parse_mipi(struct drm_i915_private *dev_priv, struct bdb_header *bdb)
 {
 	struct bdb_mipi *mipi;
 
-	mipi = find_section(bdb, BDB_MIPI_CONFIG);
+	mipi = find_section(bdb, BDB_MIPI);
 	if (!mipi) {
 		DRM_DEBUG_KMS("No MIPI BDB found");
 		return;
 	}
 
 	/* XXX: add more info */
-	dev_priv->vbt.dsi.panel_id = MIPI_DSI_GENERIC_PANEL_ID;
+	dev_priv->vbt.dsi.panel_id = mipi->panel_id;
 }
 
 static void parse_ddi_port(struct drm_i915_private *dev_priv, enum port port,
@@ -836,9 +804,6 @@ init_vbt_defaults(struct drm_i915_private *dev_priv)
 	enum port port;
 
 	dev_priv->vbt.crt_ddc_pin = GMBUS_PORT_VGADDC;
-
-	/* Default to having backlight */
-	dev_priv->vbt.backlight.present = true;
 
 	/* LFP panel data */
 	dev_priv->vbt.lvds_dither = 1;

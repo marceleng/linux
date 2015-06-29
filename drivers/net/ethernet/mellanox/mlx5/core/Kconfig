@@ -4,5 +4,5 @@
 
 config MLX5_CORE
 	tristate
-	depends on PCI
+	depends on PCI && X86
 	default n

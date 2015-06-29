@@ -282,7 +282,7 @@ void		nfsd_lockd_shutdown(void);
  * reason.
  */
 #define	COMPOUND_SLACK_SPACE		140    /* OP_GETFH */
-#define COMPOUND_ERR_SLACK_SPACE	16     /* OP_SETATTR */
+#define COMPOUND_ERR_SLACK_SPACE	12     /* OP_SETATTR */
 
 #define NFSD_LAUNDROMAT_MINTIMEOUT      1   /* seconds */
 
@@ -328,14 +328,11 @@ void		nfsd_lockd_shutdown(void);
 	(NFSD4_SUPPORTED_ATTRS_WORD2 | FATTR4_WORD2_SUPPATTR_EXCLCREAT)
 
 #ifdef CONFIG_NFSD_V4_SECURITY_LABEL
-#define NFSD4_2_SECURITY_ATTRS		FATTR4_WORD2_SECURITY_LABEL
-#else
-#define NFSD4_2_SECURITY_ATTRS		0
-#endif
-
 #define NFSD4_2_SUPPORTED_ATTRS_WORD2 \
-	(NFSD4_1_SUPPORTED_ATTRS_WORD2 | \
-	NFSD4_2_SECURITY_ATTRS)
+	(NFSD4_1_SUPPORTED_ATTRS_WORD2 | FATTR4_WORD2_SECURITY_LABEL)
+#else
+#define NFSD4_2_SUPPORTED_ATTRS_WORD2 0
+#endif
 
 static inline u32 nfsd_suppattrs0(u32 minorversion)
 {

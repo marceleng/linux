@@ -22,7 +22,6 @@
  */
 #include <asm/pgtable-ppc64.h>
 #include <asm/bug.h>
-#include <asm/processor.h>
 
 /*
  * Segment table
@@ -497,7 +496,7 @@ extern void slb_set_size(u16 size);
  */
 struct subpage_prot_table {
 	unsigned long maxaddr;	/* only addresses < this are protected */
-	unsigned int **protptrs[(TASK_SIZE_USER64 >> 43)];
+	unsigned int **protptrs[2];
 	unsigned int *low_prot[4];
 };
 

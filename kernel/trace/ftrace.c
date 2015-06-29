@@ -331,11 +331,11 @@ static void update_ftrace_function(void)
 		func = ftrace_ops_list_func;
 	}
 
-	update_function_graph_func();
-
 	/* If there's no change, then do nothing more here */
 	if (ftrace_trace_function == func)
 		return;
+
+	update_function_graph_func();
 
 	/*
 	 * If we are using the list function, it doesn't care
@@ -1115,12 +1115,6 @@ static __init void ftrace_profile_debugfs(struct dentry *d_tracer)
 #endif /* CONFIG_FUNCTION_PROFILER */
 
 static struct pid * const ftrace_swapper_pid = &init_struct_pid;
-
-#ifdef CONFIG_FUNCTION_GRAPH_TRACER
-static int ftrace_graph_active;
-#else
-# define ftrace_graph_active 0
-#endif
 
 loff_t
 ftrace_filter_lseek(struct file *file, loff_t offset, int whence)
@@ -2242,36 +2236,24 @@ static int ftrace_shutdown(struct ftrace_ops *ops, int command)
 
 static void ftrace_startup_sysctl(void)
 {
-	int command;
-
 	if (unlikely(ftrace_disabled))
 		return;
 
 	/* Force update next time */
 	saved_ftrace_func = NULL;
 	/* ftrace_start_up is true if we want ftrace running */
-	if (ftrace_start_up) {
-		command = FTRACE_UPDATE_CALLS;
-		if (ftrace_graph_active)
-			command |= FTRACE_START_FUNC_RET;
-		ftrace_startup_enable(command);
-	}
+	if (ftrace_start_up)
+		ftrace_run_update_code(FTRACE_UPDATE_CALLS);
 }
 
 static void ftrace_shutdown_sysctl(void)
 {
-	int command;
-
 	if (unlikely(ftrace_disabled))
 		return;
 
 	/* ftrace_start_up is true if ftrace is running */
-	if (ftrace_start_up) {
-		command = FTRACE_DISABLE_CALLS;
-		if (ftrace_graph_active)
-			command |= FTRACE_STOP_FUNC_RET;
-		ftrace_run_update_code(command);
-	}
+	if (ftrace_start_up)
+		ftrace_run_update_code(FTRACE_DISABLE_CALLS);
 }
 
 static cycle_t		ftrace_update_time;
@@ -4346,11 +4328,16 @@ static void ftrace_init_module(struct module *mod,
 	ftrace_process_locs(mod, start, end);
 }
 
-void ftrace_module_init(struct module *mod)
+static int ftrace_module_notify_enter(struct notifier_block *self,
+				      unsigned long val, void *data)
 {
-	ftrace_init_module(mod, mod->ftrace_callsites,
-			   mod->ftrace_callsites +
-			   mod->num_ftrace_callsites);
+	struct module *mod = data;
+
+	if (val == MODULE_STATE_COMING)
+		ftrace_init_module(mod, mod->ftrace_callsites,
+				   mod->ftrace_callsites +
+				   mod->num_ftrace_callsites);
+	return 0;
 }
 
 static int ftrace_module_notify_exit(struct notifier_block *self,
@@ -4364,12 +4351,22 @@ static int ftrace_module_notify_exit(struct notifier_block *self,
 	return 0;
 }
 #else
+static int ftrace_module_notify_enter(struct notifier_block *self,
+				      unsigned long val, void *data)
+{
+	return 0;
+}
 static int ftrace_module_notify_exit(struct notifier_block *self,
 				     unsigned long val, void *data)
 {
 	return 0;
 }
 #endif /* CONFIG_MODULES */
+
+struct notifier_block ftrace_module_enter_nb = {
+	.notifier_call = ftrace_module_notify_enter,
+	.priority = INT_MAX,	/* Run before anything that can use kprobes */
+};
 
 struct notifier_block ftrace_module_exit_nb = {
 	.notifier_call = ftrace_module_notify_exit,
@@ -4406,6 +4403,10 @@ void __init ftrace_init(void)
 	ret = ftrace_process_locs(NULL,
 				  __start_mcount_loc,
 				  __stop_mcount_loc);
+
+	ret = register_module_notifier(&ftrace_module_enter_nb);
+	if (ret)
+		pr_warning("Failed to register trace ftrace module enter notifier\n");
 
 	ret = register_module_notifier(&ftrace_module_exit_nb);
 	if (ret)
@@ -4900,11 +4901,11 @@ ftrace_enable_sysctl(struct ctl_table *table, int write,
 
 	if (ftrace_enabled) {
 
+		ftrace_startup_sysctl();
+
 		/* we are starting ftrace again */
 		if (ftrace_ops_list != &ftrace_list_end)
 			update_ftrace_function();
-
-		ftrace_startup_sysctl();
 
 	} else {
 		/* stopping ftrace calls (just send to ftrace_stub) */
@@ -4920,6 +4921,7 @@ ftrace_enable_sysctl(struct ctl_table *table, int write,
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 
+static int ftrace_graph_active;
 static struct notifier_block ftrace_suspend_notifier;
 
 int ftrace_graph_entry_stub(struct ftrace_graph_ent *trace)

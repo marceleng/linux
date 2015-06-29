@@ -91,8 +91,8 @@
 #include <linux/list.h>
 #include <linux/init.h>
 #include <linux/bio.h>
-#include <linux/log2.h>
 #endif
+#include <linux/log2.h>
 
 static struct kmem_cache *jbd2_revoke_record_cache;
 static struct kmem_cache *jbd2_revoke_table_cache;
@@ -597,7 +597,7 @@ static void write_one_revoke_record(journal_t *journal,
 	offset = *offsetp;
 
 	/* Do we need to leave space at the end for a checksum? */
-	if (jbd2_journal_has_csum_v2or3(journal))
+	if (JBD2_HAS_INCOMPAT_FEATURE(journal, JBD2_FEATURE_INCOMPAT_CSUM_V2))
 		csum_size = sizeof(struct jbd2_journal_revoke_tail);
 
 	/* Make sure we have a descriptor with space left for the record */
@@ -644,7 +644,7 @@ static void jbd2_revoke_csum_set(journal_t *j, struct buffer_head *bh)
 	struct jbd2_journal_revoke_tail *tail;
 	__u32 csum;
 
-	if (!jbd2_journal_has_csum_v2or3(j))
+	if (!JBD2_HAS_INCOMPAT_FEATURE(j, JBD2_FEATURE_INCOMPAT_CSUM_V2))
 		return;
 
 	tail = (struct jbd2_journal_revoke_tail *)(bh->b_data + j->j_blocksize -

@@ -787,7 +787,7 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 	int sense_deferred = 0;
 	enum {ACTION_FAIL, ACTION_REPREP, ACTION_RETRY,
 	      ACTION_DELAYED_RETRY} action;
-	unsigned long wait_for = (cmd->allowed + 1) * req->timeout;
+	char *description = NULL;
 
 	if (result) {
 		sense_valid = scsi_command_normalize_sense(cmd, &sshdr);
@@ -831,14 +831,6 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 			scsi_next_command(cmd);
 			return;
 		}
-	} else if (blk_rq_bytes(req) == 0 && result && !sense_deferred) {
-		/*
-		 * Certain non BLOCK_PC requests are commands that don't
-		 * actually transfer anything (FLUSH), so cannot use
-		 * good_bytes != blk_rq_bytes(req) as the signal for an error.
-		 * This sets the error explicitly for the problem case.
-		 */
-		error = __scsi_error_from_host_byte(cmd, result);
 	}
 
 	/* no bidi support for !REQ_TYPE_BLOCK_PC yet */
@@ -896,6 +888,7 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 				 * and quietly refuse further access.
 				 */
 				cmd->device->changed = 1;
+				description = "Media Changed";
 				action = ACTION_FAIL;
 			} else {
 				/* Must have been a power glitch, or a
@@ -923,10 +916,27 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 				cmd->device->use_10_for_rw = 0;
 				action = ACTION_REPREP;
 			} else if (sshdr.asc == 0x10) /* DIX */ {
+				description = "Host Data Integrity Failure";
 				action = ACTION_FAIL;
 				error = -EILSEQ;
 			/* INVALID COMMAND OPCODE or INVALID FIELD IN CDB */
 			} else if (sshdr.asc == 0x20 || sshdr.asc == 0x24) {
+				switch (cmd->cmnd[0]) {
+				case UNMAP:
+					description = "Discard failure";
+					break;
+				case WRITE_SAME:
+				case WRITE_SAME_16:
+					if (cmd->cmnd[1] & 0x8)
+						description = "Discard failure";
+					else
+						description =
+							"Write same failure";
+					break;
+				default:
+					description = "Invalid command failure";
+					break;
+				}
 				action = ACTION_FAIL;
 				error = -EREMOTEIO;
 			} else
@@ -934,8 +944,10 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 			break;
 		case ABORTED_COMMAND:
 			action = ACTION_FAIL;
-			if (sshdr.asc == 0x10) /* DIF */
+			if (sshdr.asc == 0x10) { /* DIF */
+				description = "Target Data Integrity Failure";
 				error = -EILSEQ;
+			}
 			break;
 		case NOT_READY:
 			/* If the device is in the process of becoming
@@ -954,32 +966,37 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 					action = ACTION_DELAYED_RETRY;
 					break;
 				default:
+					description = "Device not ready";
 					action = ACTION_FAIL;
 					break;
 				}
-			} else
+			} else {
+				description = "Device not ready";
 				action = ACTION_FAIL;
+			}
 			break;
 		case VOLUME_OVERFLOW:
 			/* See SSC3rXX or current. */
 			action = ACTION_FAIL;
 			break;
 		default:
+			description = "Unhandled sense code";
 			action = ACTION_FAIL;
 			break;
 		}
-	} else
+	} else {
+		description = "Unhandled error code";
 		action = ACTION_FAIL;
-
-	if (action != ACTION_FAIL &&
-	    time_before(cmd->jiffies_at_alloc + wait_for, jiffies))
-		action = ACTION_FAIL;
+	}
 
 	switch (action) {
 	case ACTION_FAIL:
 		/* Give up and fail the remainder of the request */
 		scsi_release_buffers(cmd);
 		if (!(req->cmd_flags & REQ_QUIET)) {
+			if (description)
+				scmd_printk(KERN_INFO, cmd, "%s\n",
+					    description);
 			scsi_print_result(cmd);
 			if (driver_byte(result) & DRIVER_SENSE)
 				scsi_print_sense("", cmd);
@@ -1233,11 +1250,9 @@ int scsi_prep_state_check(struct scsi_device *sdev, struct request *req)
 				    "rejecting I/O to dead device\n");
 			ret = BLKPREP_KILL;
 			break;
+		case SDEV_QUIESCE:
 		case SDEV_BLOCK:
 		case SDEV_CREATED_BLOCK:
-			ret = BLKPREP_DEFER;
-			break;
-		case SDEV_QUIESCE:
 			/*
 			 * If the devices is blocked we defer normal commands.
 			 */

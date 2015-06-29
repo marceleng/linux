@@ -450,17 +450,7 @@ void cfg80211_leave(struct cfg80211_registered_device *rdev,
 		    struct wireless_dev *wdev);
 
 void cfg80211_stop_p2p_device(struct cfg80211_registered_device *rdev,
-		struct wireless_dev *wdev);
-
-/**
- * find_process_by_pid - find a process with a matching PID value.
- * @pid: the pid in question.
- *
- * The task of @pid, if found. %NULL otherwise.
- */
-static struct task_struct* find_process_by_pid(pid_t pid) {
-	return pid ? find_task_by_vpid(pid) : current;
-}
+			      struct wireless_dev *wdev);
 
 #define CFG80211_MAX_NUM_DIFFERENT_CHANNELS 10
 

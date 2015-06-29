@@ -749,12 +749,10 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 	u32 hw_reconf_flags = 0;
 	int i, flushed;
 	struct ps_data *ps;
-	bool cancel_scan;
 
 	clear_bit(SDATA_STATE_RUNNING, &sdata->state);
 
-	cancel_scan = rcu_access_pointer(local->scan_sdata) == sdata;
-	if (cancel_scan)
+	if (rcu_access_pointer(local->scan_sdata) == sdata)
 		ieee80211_scan_cancel(local);
 
 	/*
@@ -965,9 +963,6 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 
 	ieee80211_recalc_ps(local, -1);
 
-	if (cancel_scan)
-		flush_delayed_work(&local->scan_work);
-
 	if (local->open_count == 0) {
 		ieee80211_stop_device(local);
 
@@ -1067,8 +1062,7 @@ static void ieee80211_uninit(struct net_device *dev)
 
 static u16 ieee80211_netdev_select_queue(struct net_device *dev,
 					 struct sk_buff *skb,
-					 void *accel_priv,
-					 select_queue_fallback_t fallback)
+					 void *accel_priv)
 {
 	return ieee80211_select_queue(IEEE80211_DEV_TO_SUB_IF(dev), skb);
 }
@@ -1086,8 +1080,7 @@ static const struct net_device_ops ieee80211_dataif_ops = {
 
 static u16 ieee80211_monitor_select_queue(struct net_device *dev,
 					  struct sk_buff *skb,
-					  void *accel_priv,
-					  select_queue_fallback_t fallback)
+					  void *accel_priv)
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 	struct ieee80211_local *local = sdata->local;
@@ -1781,6 +1774,7 @@ void ieee80211_remove_interfaces(struct ieee80211_local *local)
 	}
 	mutex_unlock(&local->iflist_mtx);
 	unregister_netdevice_many(&unreg_list);
+	list_del(&unreg_list);
 
 	list_for_each_entry_safe(sdata, tmp, &wdev_list, list) {
 		list_del(&sdata->list);

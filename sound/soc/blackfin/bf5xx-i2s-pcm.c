@@ -293,19 +293,19 @@ static int bf5xx_pcm_silence(struct snd_pcm_substream *substream,
 	unsigned int sample_size = runtime->sample_bits / 8;
 	void *buf = runtime->dma_area;
 	struct bf5xx_i2s_pcm_data *dma_data;
-	unsigned int offset, samples;
+	unsigned int offset, size;
 
 	dma_data = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
 
 	if (dma_data->tdm_mode) {
 		offset = pos * 8 * sample_size;
-		samples = count * 8;
+		size = count * 8 * sample_size;
 	} else {
 		offset = frames_to_bytes(runtime, pos);
-		samples = count * runtime->channels;
+		size = frames_to_bytes(runtime, count);
 	}
 
-	snd_pcm_format_set_silence(runtime->format, buf + offset, samples);
+	snd_pcm_format_set_silence(runtime->format, buf + offset, size);
 
 	return 0;
 }

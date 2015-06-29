@@ -19,8 +19,6 @@ drivers/char/lp.ko
 drivers/char/nvram.ko
 drivers/char/ppdev.ko
 drivers/char/raw.ko
-drivers/hid/hid.ko
-drivers/hid/hid-hyperv.ko
 drivers/hv/*
 drivers/infiniband/core/ib_core.ko
 drivers/infiniband/core/ib_addr.ko
@@ -32,7 +30,6 @@ drivers/infiniband/core/rdma_cm.ko
 drivers/input/evbug.ko
 drivers/input/gameport/gameport.ko
 drivers/input/mouse/psmouse.ko
-drivers/input/serio/hyperv-keyboard.ko
 drivers/input/serio/serio_raw.ko
 drivers/input/serio/serport.ko
 drivers/input/joydev.ko
@@ -99,7 +96,6 @@ drivers/video/output.ko
 drivers/video/syscopyarea.ko
 drivers/video/sysfillrect.ko
 drivers/video/sysimgblt.ko
-drivers/video/hyperv_fb.ko
 drivers/video/vga16fb.ko
 drivers/video/vgastate.ko
 drivers/video/xen-fbfront.ko
@@ -163,7 +159,6 @@ net/vmw_vsock/*
 net/x25/*
 net/xfrm/*
 net/sunrpc/auth_gss/auth_rpcgss.ko
-net/sunrpc/auth_gss/rpcsec_gss_krb5.ko
 net/sunrpc/sunrpc.ko
 sound/soundcore.ko
 sound/core/*

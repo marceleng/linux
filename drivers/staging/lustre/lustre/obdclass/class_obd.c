@@ -35,7 +35,7 @@
  */
 
 #define DEBUG_SUBSYSTEM S_CLASS
-# include <linux/atomic.h>
+# include <asm/atomic.h>
 
 #include <obd_support.h>
 #include <obd_class.h>

@@ -398,7 +398,7 @@ static int wait_for_stat(struct tpm_chip *chip, u8 mask, unsigned long timeout,
  */
 static int recv_data(struct tpm_chip *chip, u8 *buf, size_t count)
 {
-	int size = 0, burstcnt, len, ret;
+	int size = 0, burstcnt, len;
 	struct i2c_client *client;
 
 	client = (struct i2c_client *)TPM_VPRIV(chip);
@@ -413,10 +413,7 @@ static int recv_data(struct tpm_chip *chip, u8 *buf, size_t count)
 		if (burstcnt < 0)
 			return burstcnt;
 		len = min_t(int, burstcnt, count - size);
-		ret = I2C_READ_DATA(client, TPM_DATA_FIFO, buf + size, len);
-		if (ret < 0)
-			return ret;
-
+		I2C_READ_DATA(client, TPM_DATA_FIFO, buf + size, len);
 		size += len;
 	}
 	return size;
@@ -491,7 +488,7 @@ static int tpm_stm_i2c_send(struct tpm_chip *chip, unsigned char *buf,
 		if (burstcnt < 0)
 			return burstcnt;
 		size = min_t(int, len - i - 1, burstcnt);
-		ret = I2C_WRITE_DATA(client, TPM_DATA_FIFO, buf + i, size);
+		ret = I2C_WRITE_DATA(client, TPM_DATA_FIFO, buf, size);
 		if (ret < 0)
 			goto out_err;
 
@@ -753,7 +750,6 @@ tpm_st33_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	}
 
 	tpm_get_timeouts(chip);
-	tpm_do_selftest(chip);
 
 	dev_info(chip->dev, "TPM I2C Initialized\n");
 	return 0;

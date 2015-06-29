@@ -187,7 +187,7 @@ err_put:
 	mlx4_table_put(dev, &cq_table->table, *cqn);
 
 err_out:
-	mlx4_bitmap_free(&cq_table->bitmap, *cqn, MLX4_NO_RR);
+	mlx4_bitmap_free(&cq_table->bitmap, *cqn);
 	return err;
 }
 
@@ -217,7 +217,7 @@ void __mlx4_cq_free_icm(struct mlx4_dev *dev, int cqn)
 
 	mlx4_table_put(dev, &cq_table->cmpt_table, cqn);
 	mlx4_table_put(dev, &cq_table->table, cqn);
-	mlx4_bitmap_free(&cq_table->bitmap, cqn, MLX4_NO_RR);
+	mlx4_bitmap_free(&cq_table->bitmap, cqn);
 }
 
 static void mlx4_cq_free_icm(struct mlx4_dev *dev, int cqn)
@@ -294,7 +294,6 @@ int mlx4_cq_alloc(struct mlx4_dev *dev, int nent,
 	atomic_set(&cq->refcount, 1);
 	init_completion(&cq->free);
 
-	cq->irq = priv->eq_table.eq[cq->vector].irq;
 	return 0;
 
 err_radix:

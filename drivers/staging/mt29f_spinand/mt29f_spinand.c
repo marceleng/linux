@@ -924,7 +924,6 @@ static int spinand_remove(struct spi_device *spi)
 
 static const struct of_device_id spinand_dt[] = {
 	{ .compatible = "spinand,mt29f", },
-	{}
 };
 
 /*

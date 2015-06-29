@@ -248,8 +248,8 @@ static struct dmi_system_id acpi_osi_dmi_table[] __initdata = {
 	},
 
 	/*
-	 * The wireless hotkey does not work on those machines when
-	 * returning true for _OSI("Windows 2012")
+	 * The following machines have broken backlight support when reporting
+	 * the Windows 2012 OSI, so disable it until their support is fixed.
 	 */
 	{
 	.callback = dmi_disable_osi_win8,
@@ -257,6 +257,14 @@ static struct dmi_system_id acpi_osi_dmi_table[] __initdata = {
 	.matches = {
 		     DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
 		     DMI_MATCH(DMI_PRODUCT_NAME, "UX31A"),
+		},
+	},
+	{
+	.callback = dmi_disable_osi_win8,
+	.ident = "Dell Inspiron 15R SE",
+	.matches = {
+		     DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+		     DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 7520"),
 		},
 	},
 	{
@@ -315,54 +323,7 @@ static struct dmi_system_id acpi_osi_dmi_table[] __initdata = {
 		     DMI_MATCH(DMI_PRODUCT_VERSION, "2349D15"),
 		},
 	},
-	{
-	.callback = dmi_disable_osi_win8,
-	.ident = "Dell Inspiron 7737",
-	.matches = {
-		    DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		    DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 7737"),
-		},
-	},
-	{
-	.callback = dmi_disable_osi_win8,
-	.ident = "Dell Inspiron 7537",
-	.matches = {
-		    DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		    DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 7537"),
-		},
-	},
-	{
-	.callback = dmi_disable_osi_win8,
-	.ident = "Dell Inspiron 5437",
-	.matches = {
-		    DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		    DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 5437"),
-		},
-	},
-	{
-	.callback = dmi_disable_osi_win8,
-	.ident = "Dell Inspiron 3437",
-	.matches = {
-		    DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		    DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 3437"),
-		},
-	},
-	{
-	.callback = dmi_disable_osi_win8,
-	.ident = "Dell Vostro 3446",
-	.matches = {
-		    DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		    DMI_MATCH(DMI_PRODUCT_NAME, "Vostro 3446"),
-		},
-	},
-	{
-	.callback = dmi_disable_osi_win8,
-	.ident = "Dell Vostro 3546",
-	.matches = {
-		    DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		    DMI_MATCH(DMI_PRODUCT_NAME, "Vostro 3546"),
-		},
-	},
+
 	/*
 	 * The following Lenovo models have a broken workaround in the
 	 * acpi_video backlight implementation to meet the Windows 8
@@ -441,18 +402,6 @@ static struct dmi_system_id acpi_osi_dmi_table[] __initdata = {
 		     DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 5537"),
 		},
 	},
-	/*
-	 * The brightness hotkeys do not work on those machines when
-	 * returning true for _OSI("Windows 2012")
-	 */
-	{
-	.callback = dmi_disable_osi_win8,
-	.ident = "HP Pavilion dv6",
-	.matches = {
-		    DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
-		    DMI_MATCH(DMI_PRODUCT_NAME, "HP Pavilion dv6 Notebook PC"),
-		},
-	},
 
 	/*
 	 * BIOS invocation of _OSI(Linux) is almost always a BIOS bug.
@@ -511,19 +460,6 @@ static struct dmi_system_id acpi_osi_dmi_table[] __initdata = {
 	.matches = {
 		     DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
 		     DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T500"),
-		},
-	},
-	/*
-	 * Without this this EEEpc exports a non working WMI interface, with
-	 * this it exports a working "good old" eeepc_laptop interface, fixing
-	 * both brightness control, and rfkill not working.
-	 */
-	{
-	.callback = dmi_enable_osi_linux,
-	.ident = "Asus EEE PC 1015PX",
-	.matches = {
-		     DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK Computer INC."),
-		     DMI_MATCH(DMI_PRODUCT_NAME, "1015PX"),
 		},
 	},
 	{}

@@ -261,7 +261,7 @@ ieee80211_add_rx_radiotap_header(struct ieee80211_local *local,
 	else if (rate && rate->flags & IEEE80211_RATE_ERP_G)
 		channel_flags |= IEEE80211_CHAN_OFDM | IEEE80211_CHAN_2GHZ;
 	else if (rate)
-		channel_flags |= IEEE80211_CHAN_CCK | IEEE80211_CHAN_2GHZ;
+		channel_flags |= IEEE80211_CHAN_OFDM | IEEE80211_CHAN_2GHZ;
 	else
 		channel_flags |= IEEE80211_CHAN_2GHZ;
 	put_unaligned_le16(channel_flags, pos);
@@ -599,10 +599,10 @@ static int ieee80211_is_unicast_robust_mgmt_frame(struct sk_buff *skb)
 {
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
 
-	if (is_multicast_ether_addr(hdr->addr1))
+	if (skb->len < 24 || is_multicast_ether_addr(hdr->addr1))
 		return 0;
 
-	return ieee80211_is_robust_mgmt_frame(skb);
+	return ieee80211_is_robust_mgmt_frame(hdr);
 }
 
 
@@ -610,10 +610,10 @@ static int ieee80211_is_multicast_robust_mgmt_frame(struct sk_buff *skb)
 {
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
 
-	if (!is_multicast_ether_addr(hdr->addr1))
+	if (skb->len < 24 || !is_multicast_ether_addr(hdr->addr1))
 		return 0;
 
-	return ieee80211_is_robust_mgmt_frame(skb);
+	return ieee80211_is_robust_mgmt_frame(hdr);
 }
 
 
@@ -626,7 +626,7 @@ static int ieee80211_get_mmie_keyidx(struct sk_buff *skb)
 	if (skb->len < 24 + sizeof(*mmie) || !is_multicast_ether_addr(hdr->da))
 		return -1;
 
-	if (!ieee80211_is_robust_mgmt_frame(skb))
+	if (!ieee80211_is_robust_mgmt_frame((struct ieee80211_hdr *) hdr))
 		return -1; /* not a robust management frame */
 
 	mmie = (struct ieee80211_mmie *)
@@ -811,10 +811,9 @@ static void ieee80211_sta_reorder_release(struct ieee80211_sub_if_data *sdata,
 
  set_release_timer:
 
-		if (!tid_agg_rx->removed)
-			mod_timer(&tid_agg_rx->reorder_timer,
-				  tid_agg_rx->reorder_time[j] + 1 +
-				  HT_RX_REORDER_BUF_TIMEOUT);
+		mod_timer(&tid_agg_rx->reorder_timer,
+			  tid_agg_rx->reorder_time[j] + 1 +
+			  HT_RX_REORDER_BUF_TIMEOUT);
 	} else {
 		del_timer(&tid_agg_rx->reorder_timer);
 	}
@@ -1648,14 +1647,11 @@ ieee80211_rx_h_defragment(struct ieee80211_rx_data *rx)
 	sc = le16_to_cpu(hdr->seq_ctrl);
 	frag = sc & IEEE80211_SCTL_FRAG;
 
-	if (is_multicast_ether_addr(hdr->addr1)) {
-		rx->local->dot11MulticastReceivedFrameCount++;
-		goto out_no_led;
-	}
-
-	if (likely(!ieee80211_has_morefrags(fc) && frag == 0))
+	if (likely((!ieee80211_has_morefrags(fc) && frag == 0) ||
+		   is_multicast_ether_addr(hdr->addr1))) {
+		/* not fragmented */
 		goto out;
-
+	}
 	I802_DEBUG_INC(rx->local->rx_handlers_fragments);
 
 	if (skb_linearize(rx->skb))
@@ -1746,10 +1742,12 @@ ieee80211_rx_h_defragment(struct ieee80211_rx_data *rx)
 	status->rx_flags |= IEEE80211_RX_FRAGMENTED;
 
  out:
-	ieee80211_led_rx(rx->local);
- out_no_led:
 	if (rx->sta)
 		rx->sta->rx_packets++;
+	if (is_multicast_ether_addr(hdr->addr1))
+		rx->local->dot11MulticastReceivedFrameCount++;
+	else
+		ieee80211_led_rx(rx->local);
 	return RX_CONTINUE;
 }
 
@@ -1822,7 +1820,8 @@ static int ieee80211_drop_unencrypted_mgmt(struct ieee80211_rx_data *rx)
 		 * having configured keys.
 		 */
 		if (unlikely(ieee80211_is_action(fc) && !rx->key &&
-			     ieee80211_is_robust_mgmt_frame(rx->skb)))
+			     ieee80211_is_robust_mgmt_frame(
+				     (struct ieee80211_hdr *) rx->skb->data)))
 			return -EACCES;
 	}
 
@@ -2078,9 +2077,6 @@ ieee80211_rx_h_mesh_fwding(struct ieee80211_rx_data *rx)
 	/* reload pointers */
 	hdr = (struct ieee80211_hdr *) skb->data;
 	mesh_hdr = (struct ieee80211s_hdr *) (skb->data + hdrlen);
-
-	if (ieee80211_drop_unencrypted(rx, hdr->frame_control))
-		return RX_DROP_MONITOR;
 
 	/* frame is in RMC, don't forward */
 	if (ieee80211_is_data(hdr->frame_control) &&

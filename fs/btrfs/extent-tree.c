@@ -5532,8 +5532,7 @@ void btrfs_prepare_extent_commit(struct btrfs_trans_handle *trans,
 	update_global_block_rsv(fs_info);
 }
 
-static int unpin_extent_range(struct btrfs_root *root, u64 start, u64 end,
-			      const bool return_free_space)
+static int unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
 {
 	struct btrfs_fs_info *fs_info = root->fs_info;
 	struct btrfs_block_group_cache *cache = NULL;
@@ -5557,8 +5556,7 @@ static int unpin_extent_range(struct btrfs_root *root, u64 start, u64 end,
 
 		if (start < cache->last_byte_to_unpin) {
 			len = min(len, cache->last_byte_to_unpin - start);
-			if (return_free_space)
-				btrfs_add_free_space(cache, start, len);
+			btrfs_add_free_space(cache, start, len);
 		}
 
 		start += len;
@@ -5621,7 +5619,7 @@ int btrfs_finish_extent_commit(struct btrfs_trans_handle *trans,
 						   end + 1 - start, NULL);
 
 		clear_extent_dirty(unpin, start, end, GFP_NOFS);
-		unpin_extent_range(root, start, end, true);
+		unpin_extent_range(root, start, end);
 		cond_resched();
 	}
 
@@ -6667,11 +6665,12 @@ static int __btrfs_free_reserved_extent(struct btrfs_root *root,
 		return -ENOSPC;
 	}
 
+	if (btrfs_test_opt(root, DISCARD))
+		ret = btrfs_discard_extent(root, start, len, NULL);
+
 	if (pin)
 		pin_down_extent(root, cache, start, len, 1);
 	else {
-		if (btrfs_test_opt(root, DISCARD))
-			ret = btrfs_discard_extent(root, start, len, NULL);
 		btrfs_add_free_space(cache, start, len);
 		btrfs_update_reserved_bytes(cache, len, RESERVE_FREE);
 	}
@@ -8871,7 +8870,7 @@ out:
 
 int btrfs_error_unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
 {
-	return unpin_extent_range(root, start, end, false);
+	return unpin_extent_range(root, start, end);
 }
 
 int btrfs_error_discard_extent(struct btrfs_root *root, u64 bytenr,

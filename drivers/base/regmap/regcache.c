@@ -603,8 +603,7 @@ static int regcache_sync_block_single(struct regmap *map, void *block,
 	for (i = start; i < end; i++) {
 		regtmp = block_base + (i * map->reg_stride);
 
-		if (!regcache_reg_present(cache_present, i) ||
-		    !regmap_writeable(map, regtmp))
+		if (!regcache_reg_present(cache_present, i))
 			continue;
 
 		val = regcache_get_val(map, block, i);
@@ -667,8 +666,7 @@ static int regcache_sync_block_raw(struct regmap *map, void *block,
 	for (i = start; i < end; i++) {
 		regtmp = block_base + (i * map->reg_stride);
 
-		if (!regcache_reg_present(cache_present, i) ||
-		    !regmap_writeable(map, regtmp)) {
+		if (!regcache_reg_present(cache_present, i)) {
 			ret = regcache_sync_block_raw_flush(map, &data,
 							    base, regtmp);
 			if (ret != 0)
@@ -703,7 +701,7 @@ int regcache_sync_block(struct regmap *map, void *block,
 			unsigned int block_base, unsigned int start,
 			unsigned int end)
 {
-	if (regmap_can_raw_write(map) && !map->use_single_rw)
+	if (regmap_can_raw_write(map))
 		return regcache_sync_block_raw(map, block, cache_present,
 					       block_base, start, end);
 	else

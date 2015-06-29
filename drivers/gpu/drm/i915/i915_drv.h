@@ -876,7 +876,6 @@ struct i915_suspend_saved_registers {
 	u32 savePIPEB_LINK_N1;
 	u32 saveMCHBAR_RENDER_STANDBY;
 	u32 savePCH_PORT_HOTPLUG;
-	u16 saveGCDGMBUS;
 };
 
 struct intel_gen6_power_mgmt {
@@ -1754,8 +1753,8 @@ struct drm_i915_file_private {
 #define IS_HSW_EARLY_SDV(dev)	(IS_HASWELL(dev) && \
 				 ((dev)->pdev->device & 0xFF00) == 0x0C00)
 #define IS_BDW_ULT(dev)		(IS_BROADWELL(dev) && \
-				 (((dev)->pdev->device & 0xf) == 0x6  || \
-				 ((dev)->pdev->device & 0xf) == 0xb  || \
+				 (((dev)->pdev->device & 0xf) == 0x2  || \
+				 ((dev)->pdev->device & 0xf) == 0x6 || \
 				 ((dev)->pdev->device & 0xf) == 0xe))
 #define IS_HSW_ULT(dev)		(IS_HASWELL(dev) && \
 				 ((dev)->pdev->device & 0xFF00) == 0x0A00)

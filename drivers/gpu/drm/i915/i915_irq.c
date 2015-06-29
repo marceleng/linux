@@ -1236,20 +1236,9 @@ static inline void intel_hpd_irq_handler(struct drm_device *dev,
 	spin_lock(&dev_priv->irq_lock);
 	for (i = 1; i < HPD_NUM_PINS; i++) {
 
-		if (hpd[i] & hotplug_trigger &&
-		    dev_priv->hpd_stats[i].hpd_mark == HPD_DISABLED) {
-			/*
-			 * On GMCH platforms the interrupt mask bits only
-			 * prevent irq generation, not the setting of the
-			 * hotplug bits itself. So only WARN about unexpected
-			 * interrupts on saner platforms.
-			 */
-			WARN_ONCE(INTEL_INFO(dev)->gen >= 5 && !IS_VALLEYVIEW(dev),
-				  "Received HPD interrupt (0x%08x) on pin %d (0x%08x) although disabled\n",
-				  hotplug_trigger, i, hpd[i]);
-
-			continue;
-		}
+		WARN(((hpd[i] & hotplug_trigger) &&
+		      dev_priv->hpd_stats[i].hpd_mark != HPD_ENABLED),
+		     "Received HPD interrupt although disabled\n");
 
 		if (!(hpd[i] & hotplug_trigger) ||
 		    dev_priv->hpd_stats[i].hpd_mark != HPD_ENABLED)
@@ -2394,27 +2383,20 @@ static int semaphore_passed(struct intel_ring_buffer *ring)
 {
 	struct drm_i915_private *dev_priv = ring->dev->dev_private;
 	struct intel_ring_buffer *signaller;
-	u32 seqno;
+	u32 seqno, ctl;
 
-	ring->hangcheck.deadlock++;
+	ring->hangcheck.deadlock = true;
 
 	signaller = semaphore_waits_for(ring, &seqno);
-	if (signaller == NULL)
+	if (signaller == NULL || signaller->hangcheck.deadlock)
 		return -1;
-
-	/* Prevent pathological recursion due to driver bugs */
-	if (signaller->hangcheck.deadlock >= I915_NUM_RINGS)
-		return -1;
-
-	if (i915_seqno_passed(signaller->get_seqno(signaller, false), seqno))
-		return 1;
 
 	/* cursory check for an unkickable deadlock */
-	if (I915_READ_CTL(signaller) & RING_WAIT_SEMAPHORE &&
-	    semaphore_passed(signaller) < 0)
+	ctl = I915_READ_CTL(signaller);
+	if (ctl & RING_WAIT_SEMAPHORE && semaphore_passed(signaller) < 0)
 		return -1;
 
-	return 0;
+	return i915_seqno_passed(signaller->get_seqno(signaller, false), seqno);
 }
 
 static void semaphore_clear_deadlocks(struct drm_i915_private *dev_priv)
@@ -2423,7 +2405,7 @@ static void semaphore_clear_deadlocks(struct drm_i915_private *dev_priv)
 	int i;
 
 	for_each_ring(ring, dev_priv, i)
-		ring->hangcheck.deadlock = 0;
+		ring->hangcheck.deadlock = false;
 }
 
 static enum intel_ring_hangcheck_action
@@ -3132,12 +3114,14 @@ static int i8xx_irq_postinstall(struct drm_device *dev)
 		~(I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |
 		  I915_DISPLAY_PIPE_B_EVENT_INTERRUPT |
 		  I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT |
-		  I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT);
+		  I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT |
+		  I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT);
 	I915_WRITE16(IMR, dev_priv->irq_mask);
 
 	I915_WRITE16(IER,
 		     I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |
 		     I915_DISPLAY_PIPE_B_EVENT_INTERRUPT |
+		     I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT |
 		     I915_USER_INTERRUPT);
 	POSTING_READ16(IER);
 
@@ -3155,16 +3139,18 @@ static int i8xx_irq_postinstall(struct drm_device *dev)
  * Returns true when a page flip has completed.
  */
 static bool i8xx_handle_vblank(struct drm_device *dev,
-			       int plane, int pipe, u32 iir)
+			       int pipe, u16 iir)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
-	u16 flip_pending = DISPLAY_PLANE_FLIP_PENDING(plane);
+	u16 flip_pending = DISPLAY_PLANE_FLIP_PENDING(pipe);
 
 	if (!drm_handle_vblank(dev, pipe))
 		return false;
 
 	if ((iir & flip_pending) == 0)
 		return false;
+
+	intel_prepare_page_flip(dev, pipe);
 
 	/* We detect FlipDone by looking for the change in PendingFlip from '1'
 	 * to '0' on the following vblank, i.e. IIR has the Pendingflip
@@ -3175,7 +3161,6 @@ static bool i8xx_handle_vblank(struct drm_device *dev,
 	if (I915_READ16(ISR) & flip_pending)
 		return false;
 
-	intel_prepare_page_flip(dev, plane);
 	intel_finish_page_flip(dev, pipe);
 
 	return true;
@@ -3234,13 +3219,9 @@ static irqreturn_t i8xx_irq_handler(int irq, void *arg)
 			notify_ring(dev, &dev_priv->ring[RCS]);
 
 		for_each_pipe(pipe) {
-			int plane = pipe;
-			if (I915_HAS_FBC(dev))
-				plane = !plane;
-
 			if (pipe_stats[pipe] & PIPE_VBLANK_INTERRUPT_STATUS &&
-			    i8xx_handle_vblank(dev, plane, pipe, iir))
-				flip_mask &= ~DISPLAY_PLANE_FLIP_PENDING(plane);
+			    i8xx_handle_vblank(dev, pipe, iir))
+				flip_mask &= ~DISPLAY_PLANE_FLIP_PENDING(pipe);
 
 			if (pipe_stats[pipe] & PIPE_CRC_DONE_INTERRUPT_STATUS)
 				i9xx_pipe_crc_irq_handler(dev, pipe);
@@ -3301,12 +3282,14 @@ static int i915_irq_postinstall(struct drm_device *dev)
 		  I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |
 		  I915_DISPLAY_PIPE_B_EVENT_INTERRUPT |
 		  I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT |
-		  I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT);
+		  I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT |
+		  I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT);
 
 	enable_mask =
 		I915_ASLE_INTERRUPT |
 		I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |
 		I915_DISPLAY_PIPE_B_EVENT_INTERRUPT |
+		I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT |
 		I915_USER_INTERRUPT;
 
 	if (I915_HAS_HOTPLUG(dev)) {
@@ -3350,6 +3333,8 @@ static bool i915_handle_vblank(struct drm_device *dev,
 	if ((iir & flip_pending) == 0)
 		return false;
 
+	intel_prepare_page_flip(dev, plane);
+
 	/* We detect FlipDone by looking for the change in PendingFlip from '1'
 	 * to '0' on the following vblank, i.e. IIR has the Pendingflip
 	 * asserted following the MI_DISPLAY_FLIP, but ISR is deasserted, hence
@@ -3359,7 +3344,6 @@ static bool i915_handle_vblank(struct drm_device *dev,
 	if (I915_READ(ISR) & flip_pending)
 		return false;
 
-	intel_prepare_page_flip(dev, plane);
 	intel_finish_page_flip(dev, pipe);
 
 	return true;
@@ -3433,7 +3417,7 @@ static irqreturn_t i915_irq_handler(int irq, void *arg)
 
 		for_each_pipe(pipe) {
 			int plane = pipe;
-			if (I915_HAS_FBC(dev))
+			if (IS_MOBILE(dev))
 				plane = !plane;
 
 			if (pipe_stats[pipe] & PIPE_VBLANK_INTERRUPT_STATUS &&

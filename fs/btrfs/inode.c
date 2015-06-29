@@ -6685,6 +6685,7 @@ static int btrfs_get_blocks_direct(struct inode *inode, sector_t iblock,
 	    ((BTRFS_I(inode)->flags & BTRFS_INODE_NODATACOW) &&
 	     em->block_start != EXTENT_MAP_HOLE)) {
 		int type;
+		int ret;
 		u64 block_start, orig_start, orig_block_len, ram_bytes;
 
 		if (test_bit(EXTENT_FLAG_PREALLOC, &em->flags))
@@ -8289,7 +8290,7 @@ int btrfs_start_delalloc_inodes(struct btrfs_root *root, int delay_iput)
 {
 	int ret;
 
-	if (test_bit(BTRFS_FS_STATE_ERROR, &root->fs_info->fs_state))
+	if (root->fs_info->sb->s_flags & MS_RDONLY)
 		return -EROFS;
 
 	ret = __start_delalloc_inodes(root, delay_iput);
@@ -8315,7 +8316,7 @@ int btrfs_start_delalloc_roots(struct btrfs_fs_info *fs_info, int delay_iput)
 	struct list_head splice;
 	int ret;
 
-	if (test_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state))
+	if (fs_info->sb->s_flags & MS_RDONLY)
 		return -EROFS;
 
 	INIT_LIST_HEAD(&splice);

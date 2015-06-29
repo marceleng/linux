@@ -4,16 +4,6 @@
 / {
 	model = "ZyXEL NSA310";
 
-	mbus {
-		pcie-controller {
-			status = "okay";
-
-			pcie@1,0 {
-				status = "okay";
-			};
-		};
-	};
-
 	ocp@f1000000 {
 		pinctrl: pinctrl@10000 {
 
@@ -35,6 +25,14 @@
 		sata@80000 {
 			status = "okay";
 			nr-ports = <2>;
+		};
+
+		pcie-controller {
+			status = "okay";
+
+			pcie@1,0 {
+				status = "okay";
+			};
 		};
 	};
 

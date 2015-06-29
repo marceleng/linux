@@ -533,7 +533,7 @@ EXPORT_SYMBOL_GPL(debugfs_remove);
  */
 void debugfs_remove_recursive(struct dentry *dentry)
 {
-	struct dentry *child, *parent;
+	struct dentry *child, *next, *parent;
 
 	if (IS_ERR_OR_NULL(dentry))
 		return;
@@ -545,49 +545,30 @@ void debugfs_remove_recursive(struct dentry *dentry)
 	parent = dentry;
  down:
 	mutex_lock(&parent->d_inode->i_mutex);
- loop:
-	/*
-	 * The parent->d_subdirs is protected by the d_lock. Outside that
-	 * lock, the child can be unlinked and set to be freed which can
-	 * use the d_u.d_child as the rcu head and corrupt this list.
-	 */
-	spin_lock(&parent->d_lock);
-	list_for_each_entry(child, &parent->d_subdirs, d_child) {
+	list_for_each_entry_safe(child, next, &parent->d_subdirs, d_u.d_child) {
 		if (!debugfs_positive(child))
 			continue;
 
 		/* perhaps simple_empty(child) makes more sense */
 		if (!list_empty(&child->d_subdirs)) {
-			spin_unlock(&parent->d_lock);
 			mutex_unlock(&parent->d_inode->i_mutex);
 			parent = child;
 			goto down;
 		}
-
-		spin_unlock(&parent->d_lock);
-
+ up:
 		if (!__debugfs_remove(child, parent))
 			simple_release_fs(&debugfs_mount, &debugfs_mount_count);
-
-		/*
-		 * The parent->d_lock protects agaist child from unlinking
-		 * from d_subdirs. When releasing the parent->d_lock we can
-		 * no longer trust that the next pointer is valid.
-		 * Restart the loop. We'll skip this one with the
-		 * debugfs_positive() check.
-		 */
-		goto loop;
 	}
-	spin_unlock(&parent->d_lock);
 
 	mutex_unlock(&parent->d_inode->i_mutex);
 	child = parent;
 	parent = parent->d_parent;
 	mutex_lock(&parent->d_inode->i_mutex);
 
-	if (child != dentry)
-		/* go up */
-		goto loop;
+	if (child != dentry) {
+		next = list_next_entry(child, d_u.d_child);
+		goto up;
+	}
 
 	if (!__debugfs_remove(child, parent))
 		simple_release_fs(&debugfs_mount, &debugfs_mount_count);

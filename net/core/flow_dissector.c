@@ -202,12 +202,12 @@ static __always_inline u32 __flow_hash_1word(u32 a)
 }
 
 /*
- * __skb_get_hash: calculate a flow hash based on src/dst addresses
+ * __skb_get_rxhash: calculate a flow hash based on src/dst addresses
  * and src/dst port numbers.  Sets rxhash in skb to non-zero hash value
  * on success, zero indicates no valid hash.  Also, sets l4_rxhash in skb
  * if hash is a canonical 4-tuple hash over transport ports.
  */
-void __skb_get_hash(struct sk_buff *skb)
+void __skb_get_rxhash(struct sk_buff *skb)
 {
 	struct flow_keys keys;
 	u32 hash;
@@ -234,7 +234,7 @@ void __skb_get_hash(struct sk_buff *skb)
 
 	skb->rxhash = hash;
 }
-EXPORT_SYMBOL(__skb_get_hash);
+EXPORT_SYMBOL(__skb_get_rxhash);
 
 /*
  * Returns a Tx hash based on the given packet descriptor a Tx queues' number
@@ -372,7 +372,7 @@ static inline int get_xps_queue(struct net_device *dev, struct sk_buff *skb)
 #endif
 }
 
-static u16 __netdev_pick_tx(struct net_device *dev, struct sk_buff *skb)
+u16 __netdev_pick_tx(struct net_device *dev, struct sk_buff *skb)
 {
 	struct sock *sk = skb->sk;
 	int queue_index = sk_tx_queue_get(sk);
@@ -392,6 +392,7 @@ static u16 __netdev_pick_tx(struct net_device *dev, struct sk_buff *skb)
 
 	return queue_index;
 }
+EXPORT_SYMBOL(__netdev_pick_tx);
 
 struct netdev_queue *netdev_pick_tx(struct net_device *dev,
 				    struct sk_buff *skb,
@@ -402,8 +403,8 @@ struct netdev_queue *netdev_pick_tx(struct net_device *dev,
 	if (dev->real_num_tx_queues != 1) {
 		const struct net_device_ops *ops = dev->netdev_ops;
 		if (ops->ndo_select_queue)
-			queue_index = ops->ndo_select_queue(dev, skb, accel_priv,
-							    __netdev_pick_tx);
+			queue_index = ops->ndo_select_queue(dev, skb,
+							    accel_priv);
 		else
 			queue_index = __netdev_pick_tx(dev, skb);
 

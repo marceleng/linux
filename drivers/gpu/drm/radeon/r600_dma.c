@@ -116,6 +116,15 @@ int r600_dma_resume(struct radeon_device *rdev)
 	u32 rb_bufsz;
 	int r;
 
+	/* Reset dma */
+	if (rdev->family >= CHIP_RV770)
+		WREG32(SRBM_SOFT_RESET, RV770_SOFT_RESET_DMA);
+	else
+		WREG32(SRBM_SOFT_RESET, SOFT_RESET_DMA);
+	RREG32(SRBM_SOFT_RESET);
+	udelay(50);
+	WREG32(SRBM_SOFT_RESET, 0);
+
 	WREG32(DMA_SEM_INCOMPLETE_TIMER_CNTL, 0);
 	WREG32(DMA_SEM_WAIT_FAIL_TIMER_CNTL, 0);
 
@@ -227,19 +236,16 @@ int r600_dma_ring_test(struct radeon_device *rdev,
 {
 	unsigned i;
 	int r;
-	unsigned index;
+	void __iomem *ptr = (void *)rdev->vram_scratch.ptr;
 	u32 tmp;
-	u64 gpu_addr;
 
-	if (ring->idx == R600_RING_TYPE_DMA_INDEX)
-		index = R600_WB_DMA_RING_TEST_OFFSET;
-	else
-		index = CAYMAN_WB_DMA1_RING_TEST_OFFSET;
-
-	gpu_addr = rdev->wb.gpu_addr + index;
+	if (!ptr) {
+		DRM_ERROR("invalid vram scratch pointer\n");
+		return -EINVAL;
+	}
 
 	tmp = 0xCAFEDEAD;
-	rdev->wb.wb[index/4] = cpu_to_le32(tmp);
+	writel(tmp, ptr);
 
 	r = radeon_ring_lock(rdev, ring, 4);
 	if (r) {
@@ -247,13 +253,13 @@ int r600_dma_ring_test(struct radeon_device *rdev,
 		return r;
 	}
 	radeon_ring_write(ring, DMA_PACKET(DMA_PACKET_WRITE, 0, 0, 1));
-	radeon_ring_write(ring, lower_32_bits(gpu_addr));
-	radeon_ring_write(ring, upper_32_bits(gpu_addr) & 0xff);
+	radeon_ring_write(ring, rdev->vram_scratch.gpu_addr & 0xfffffffc);
+	radeon_ring_write(ring, upper_32_bits(rdev->vram_scratch.gpu_addr) & 0xff);
 	radeon_ring_write(ring, 0xDEADBEEF);
 	radeon_ring_unlock_commit(rdev, ring);
 
 	for (i = 0; i < rdev->usec_timeout; i++) {
-		tmp = le32_to_cpu(rdev->wb.wb[index/4]);
+		tmp = readl(ptr);
 		if (tmp == 0xDEADBEEF)
 			break;
 		DRM_UDELAY(1);
@@ -333,17 +339,17 @@ int r600_dma_ib_test(struct radeon_device *rdev, struct radeon_ring *ring)
 {
 	struct radeon_ib ib;
 	unsigned i;
-	unsigned index;
 	int r;
+	void __iomem *ptr = (void *)rdev->vram_scratch.ptr;
 	u32 tmp = 0;
-	u64 gpu_addr;
 
-	if (ring->idx == R600_RING_TYPE_DMA_INDEX)
-		index = R600_WB_DMA_RING_TEST_OFFSET;
-	else
-		index = CAYMAN_WB_DMA1_RING_TEST_OFFSET;
+	if (!ptr) {
+		DRM_ERROR("invalid vram scratch pointer\n");
+		return -EINVAL;
+	}
 
-	gpu_addr = rdev->wb.gpu_addr + index;
+	tmp = 0xCAFEDEAD;
+	writel(tmp, ptr);
 
 	r = radeon_ib_get(rdev, ring->idx, &ib, NULL, 256);
 	if (r) {
@@ -352,8 +358,8 @@ int r600_dma_ib_test(struct radeon_device *rdev, struct radeon_ring *ring)
 	}
 
 	ib.ptr[0] = DMA_PACKET(DMA_PACKET_WRITE, 0, 0, 1);
-	ib.ptr[1] = lower_32_bits(gpu_addr);
-	ib.ptr[2] = upper_32_bits(gpu_addr) & 0xff;
+	ib.ptr[1] = rdev->vram_scratch.gpu_addr & 0xfffffffc;
+	ib.ptr[2] = upper_32_bits(rdev->vram_scratch.gpu_addr) & 0xff;
 	ib.ptr[3] = 0xDEADBEEF;
 	ib.length_dw = 4;
 
@@ -369,7 +375,7 @@ int r600_dma_ib_test(struct radeon_device *rdev, struct radeon_ring *ring)
 		return r;
 	}
 	for (i = 0; i < rdev->usec_timeout; i++) {
-		tmp = le32_to_cpu(rdev->wb.wb[index/4]);
+		tmp = readl(ptr);
 		if (tmp == 0xDEADBEEF)
 			break;
 		DRM_UDELAY(1);

@@ -276,14 +276,13 @@ nodata:
 EXPORT_SYMBOL(__alloc_skb);
 
 /**
- * __build_skb - build a network buffer
+ * build_skb - build a network buffer
  * @data: data buffer provided by caller
- * @frag_size: size of data, or 0 if head was kmalloced
+ * @frag_size: size of fragment, or 0 if head was kmalloced
  *
  * Allocate a new &sk_buff. Caller provides space holding head and
  * skb_shared_info. @data must have been allocated by kmalloc() only if
- * @frag_size is 0, otherwise data should come from the page allocator
- *  or vmalloc()
+ * @frag_size is 0, otherwise data should come from the page allocator.
  * The return is the new skb buffer.
  * On a failure the return is %NULL, and @data is not freed.
  * Notes :
@@ -294,7 +293,7 @@ EXPORT_SYMBOL(__alloc_skb);
  *  before giving packet to stack.
  *  RX rings only contains data buffers, not full skbs.
  */
-struct sk_buff *__build_skb(void *data, unsigned int frag_size)
+struct sk_buff *build_skb(void *data, unsigned int frag_size)
 {
 	struct skb_shared_info *shinfo;
 	struct sk_buff *skb;
@@ -308,6 +307,7 @@ struct sk_buff *__build_skb(void *data, unsigned int frag_size)
 
 	memset(skb, 0, offsetof(struct sk_buff, tail));
 	skb->truesize = SKB_TRUESIZE(size);
+	skb->head_frag = frag_size != 0;
 	atomic_set(&skb->users, 1);
 	skb->head = data;
 	skb->data = data;
@@ -322,23 +322,6 @@ struct sk_buff *__build_skb(void *data, unsigned int frag_size)
 	atomic_set(&shinfo->dataref, 1);
 	kmemcheck_annotate_variable(shinfo->destructor_arg);
 
-	return skb;
-}
-
-/* build_skb() is wrapper over __build_skb(), that specifically
- * takes care of skb->head and skb->pfmemalloc
- * This means that if @frag_size is not zero, then @data must be backed
- * by a page fragment, not kmalloc() or vmalloc()
- */
-struct sk_buff *build_skb(void *data, unsigned int frag_size)
-{
-	struct sk_buff *skb = __build_skb(data, frag_size);
-
-	if (skb && frag_size) {
-		skb->head_frag = 1;
-		if (virt_to_head_page(data)->pfmemalloc)
-			skb->pfmemalloc = 1;
-	}
 	return skb;
 }
 EXPORT_SYMBOL(build_skb);
@@ -367,8 +350,7 @@ refill:
 			gfp_t gfp = gfp_mask;
 
 			if (order)
-				gfp |= __GFP_COMP | __GFP_NOWARN |
-				       __GFP_NOMEMALLOC;
+				gfp |= __GFP_COMP | __GFP_NOWARN;
 			nc->frag.page = alloc_pages(gfp, order);
 			if (likely(nc->frag.page))
 				break;
@@ -2803,13 +2785,12 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	int i = 0;
 	int pos;
 
-	__skb_push(head_skb, doffset);
 	proto = skb_network_protocol(head_skb);
 	if (unlikely(!proto))
 		return ERR_PTR(-EINVAL);
 
 	csum = !!can_checksum_protocol(features, proto);
-
+	__skb_push(head_skb, doffset);
 	headroom = skb_headroom(head_skb);
 	pos = skb_headlen(head_skb);
 
@@ -2890,9 +2871,9 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 		tail = nskb;
 
 		__copy_skb_header(nskb, head_skb);
+		nskb->mac_len = head_skb->mac_len;
 
 		skb_headers_offset_update(nskb, skb_headroom(nskb) - headroom);
-		skb_reset_mac_len(nskb);
 
 		skb_copy_from_linear_data_offset(head_skb, -tnl_hlen,
 						 nskb->data - tnl_hlen,
@@ -2999,7 +2980,7 @@ int skb_gro_receive(struct sk_buff **head, struct sk_buff *skb)
 	if (unlikely(p->len + len >= 65536))
 		return -E2BIG;
 
-	lp = NAPI_GRO_CB(p)->last;
+	lp = NAPI_GRO_CB(p)->last ?: p;
 	pinfo = skb_shinfo(lp);
 
 	if (headlen <= offset) {
@@ -3061,9 +3042,6 @@ int skb_gro_receive(struct sk_buff **head, struct sk_buff *skb)
 		NAPI_GRO_CB(skb)->free = NAPI_GRO_FREE_STOLEN_HEAD;
 		goto done;
 	}
-	/* switch back to head shinfo */
-	pinfo = skb_shinfo(p);
-
 	if (pinfo->frag_list)
 		goto merge;
 	if (skb_gro_len(p) != pinfo->gso_size)
@@ -3118,7 +3096,7 @@ merge:
 
 	__skb_pull(skb, offset);
 
-	if (NAPI_GRO_CB(p)->last == p)
+	if (!NAPI_GRO_CB(p)->last)
 		skb_shinfo(p)->frag_list = skb;
 	else
 		NAPI_GRO_CB(p)->last->next = skb;
@@ -3578,21 +3556,17 @@ EXPORT_SYMBOL(skb_try_coalesce);
  */
 void skb_scrub_packet(struct sk_buff *skb, bool xnet)
 {
+	if (xnet)
+		skb_orphan(skb);
 	skb->tstamp.tv64 = 0;
 	skb->pkt_type = PACKET_HOST;
 	skb->skb_iif = 0;
 	skb->local_df = 0;
 	skb_dst_drop(skb);
-	skb_init_secmark(skb);
+	skb->mark = 0;
 	secpath_reset(skb);
 	nf_reset(skb);
 	nf_reset_trace(skb);
-
-	if (!xnet)
-		return;
-
-	skb_orphan(skb);
-	skb->mark = 0;
 }
 EXPORT_SYMBOL_GPL(skb_scrub_packet);
 
@@ -3609,14 +3583,12 @@ EXPORT_SYMBOL_GPL(skb_scrub_packet);
 unsigned int skb_gso_transport_seglen(const struct sk_buff *skb)
 {
 	const struct skb_shared_info *shinfo = skb_shinfo(skb);
+	unsigned int hdr_len;
 
 	if (likely(shinfo->gso_type & (SKB_GSO_TCPV4 | SKB_GSO_TCPV6)))
-		return tcp_hdrlen(skb) + shinfo->gso_size;
-
-	/* UFO sets gso_size to the size of the fragmentation
-	 * payload, i.e. the size of the L4 (UDP) header is already
-	 * accounted for.
-	 */
-	return shinfo->gso_size;
+		hdr_len = tcp_hdrlen(skb);
+	else
+		hdr_len = sizeof(struct udphdr);
+	return hdr_len + shinfo->gso_size;
 }
 EXPORT_SYMBOL_GPL(skb_gso_transport_seglen);

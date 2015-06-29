@@ -398,13 +398,10 @@ xfs_sb_quota_from_disk(struct xfs_sb *sbp)
 	}
 }
 
-
-
-static void
-__xfs_sb_from_disk(
+void
+xfs_sb_from_disk(
 	struct xfs_sb	*to,
-	xfs_dsb_t	*from,
-	bool	convert_xquota)
+	xfs_dsb_t	*from)
 {
 	to->sb_magicnum = be32_to_cpu(from->sb_magicnum);
 	to->sb_blocksize = be32_to_cpu(from->sb_blocksize);
@@ -460,17 +457,6 @@ __xfs_sb_from_disk(
 	to->sb_pad = 0;
 	to->sb_pquotino = be64_to_cpu(from->sb_pquotino);
 	to->sb_lsn = be64_to_cpu(from->sb_lsn);
-	/* Convert on-disk flags to in-memory flags? */
-	if (convert_xquota)
-		xfs_sb_quota_from_disk(to);
-}
-
-void
-xfs_sb_from_disk(
-	struct xfs_sb   *to,
-	xfs_dsb_t       *from)
-{
-	__xfs_sb_from_disk(to, from, true);
 }
 
 static inline void
@@ -586,11 +572,7 @@ xfs_sb_verify(
 	struct xfs_mount *mp = bp->b_target->bt_mount;
 	struct xfs_sb	sb;
 
-	/*
-	* Use call variant which doesn't convert quota flags from disk
-	* format, because xfs_mount_validate_sb checks the on-disk flags.
-	*/
-	__xfs_sb_from_disk(&sb, XFS_BUF_TO_SBP(bp), false);
+	xfs_sb_from_disk(&sb, XFS_BUF_TO_SBP(bp));
 
 	/*
 	 * Only check the in progress field for the primary superblock as

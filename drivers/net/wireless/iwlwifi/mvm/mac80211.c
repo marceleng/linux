@@ -246,13 +246,13 @@ int iwl_mvm_mac_setup_register(struct iwl_mvm *mvm)
 	else
 		hw->wiphy->flags &= ~WIPHY_FLAG_PS_ON_BY_DEFAULT;
 
-	if (IWL_UCODE_API(mvm->fw->ucode_ver) >= 10) {
+	if (0 && mvm->fw->ucode_capa.flags & IWL_UCODE_TLV_FLAGS_SCHED_SCAN) {
 		hw->wiphy->flags |= WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
 		hw->wiphy->max_sched_scan_ssids = PROBE_OPTION_MAX;
 		hw->wiphy->max_match_sets = IWL_SCAN_MAX_PROFILES;
 		/* we create the 802.11 header and zero length SSID IE. */
 		hw->wiphy->max_sched_scan_ie_len =
-			SCAN_OFFLOAD_PROBE_REQ_SIZE - 24 - 2;
+					SCAN_OFFLOAD_PROBE_REQ_SIZE - 24 - 2;
 	}
 
 	hw->wiphy->features |= NL80211_FEATURE_P2P_GO_CTWIN |
@@ -402,6 +402,9 @@ static void iwl_mvm_cleanup_iterator(void *data, u8 *mac,
 
 	mvmvif->uploaded = false;
 	mvmvif->ap_sta_id = IWL_MVM_STATION_COUNT;
+
+	/* does this make sense at all? */
+	mvmvif->color++;
 
 	spin_lock_bh(&mvm->time_event_lock);
 	iwl_mvm_te_clear_data(mvm, &mvmvif->time_event_data);
@@ -624,7 +627,7 @@ static int iwl_mvm_mac_add_interface(struct ieee80211_hw *hw,
 	if (ret)
 		goto out_remove_mac;
 
-	if (!mvm->bf_allowed_vif && false &&
+	if (!mvm->bf_allowed_vif &&
 	    vif->type == NL80211_IFTYPE_STATION && !vif->p2p &&
 	    mvm->fw->ucode_capa.flags & IWL_UCODE_TLV_FLAGS_BF_UPDATED){
 		mvm->bf_allowed_vif = mvmvif;
@@ -825,7 +828,7 @@ static int iwl_mvm_configure_mcast_filter(struct iwl_mvm *mvm,
 
 	memcpy(mcast_filter_cmd.bssid, vif->bss_conf.bssid, ETH_ALEN);
 
-	return iwl_mvm_send_cmd_pdu(mvm, MCAST_FILTER_CMD, CMD_ASYNC,
+	return iwl_mvm_send_cmd_pdu(mvm, MCAST_FILTER_CMD, CMD_SYNC,
 				    sizeof(mcast_filter_cmd),
 				    &mcast_filter_cmd);
 }
