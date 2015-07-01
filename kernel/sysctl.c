@@ -445,16 +445,30 @@ static struct ctl_table kern_table[] = {
 #endif
 #ifdef CONFIG_SCHED_ORDERED
 	{
-		.procname   = "sched_ordered_proc_number",
-		.data       = &sysctl_sched_ordered_proc_number,
+		.procname   = "sched_nb_mb",
+		.data       = &sysctl_sched_number_middleboxes,
 		.maxlen     = sizeof(unsigned int),
 		.mode       = 0644,
 		.proc_handler = proc_dointvec,
 	},
 	{
-		.procname   = "sched_ordered_proc",
-		.data       = &sysctl_sched_ordered_proc[0],
+		.procname   = "sched_mb_pids",
+		.data       = &sysctl_sched_ordered_mb[0],
 		.maxlen     = 200*sizeof(unsigned int),
+		.mode       = 0644,
+		.proc_handler = proc_dointvec,
+	},
+	{
+		.procname   = "sched_nb_ovs_threads",
+		.data       = &sysctl_sched_nb_ovs_threads,
+		.maxlen     = sizeof(unsigned int),
+		.mode       = 0644,
+		.proc_handler = proc_dointvec,
+	},
+	{
+		.procname   = "sched_ovs_pids",
+		.data       = &sysctl_sched_ovs_thr[0],
+		.maxlen     = 50*sizeof(unsigned int),
 		.mode       = 0644,
 		.proc_handler = proc_dointvec,
 	},

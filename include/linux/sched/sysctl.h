@@ -93,8 +93,10 @@ extern unsigned int sysctl_sched_autogroup_enabled;
 extern int sched_rr_timeslice;
 
 #ifdef CONFIG_SCHED_ORDERED
-extern unsigned int sysctl_sched_ordered_proc_number;
-extern unsigned int sysctl_sched_ordered_proc[200];
+extern unsigned int sysctl_sched_number_middleboxes;
+extern unsigned int sysctl_sched_nb_ovs_threads;
+extern unsigned int sysctl_sched_ordered_mb[200];
+extern unsigned int sysctl_sched_ovs_thr[50];
 #endif
 
 extern int sched_rr_handler(struct ctl_table *table, int write,

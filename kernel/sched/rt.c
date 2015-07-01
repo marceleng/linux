@@ -2,20 +2,21 @@
  * Real-Time Scheduling Class (mapped to the SCHED_FIFO and SCHED_RR
  * policies)
  */
-#define GET_PID
-#define LOSE_TIME(idx,temp) \
-	for(idx=0;idx<10000000;idx++) {temp += idx*idx;}
+
 
 #include "sched.h"
 #include <linux/slab.h>
 #include <linux/sched/sysctl.h>
 #include <linux/hashtable.h>
+#include <linux/printk.h>
 
 int sched_rr_timeslice = RR_TIMESLICE;
 
 #ifdef CONFIG_SCHED_ORDERED
-unsigned int sysctl_sched_ordered_proc_number;
-unsigned int sysctl_sched_ordered_proc[200];
+unsigned int sysctl_sched_number_middleboxes;
+unsigned int sysctl_sched_nb_ovs_threads;
+unsigned int sysctl_sched_ordered_mb[200];
+unsigned int sysctl_sched_ovs_thr[50];
 #endif
 
 static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun);
@@ -95,10 +96,14 @@ void init_rt_rq(struct rt_rq *rt_rq, struct rq *rq)
 	raw_spin_lock_init(&rt_rq->rt_runtime_lock);
 
 #ifdef CONFIG_SCHED_ORDERED
-	rt_rq->pos_in_list = 0;
-	sysctl_sched_ordered_proc_number = 0;
-	sysctl_sched_ordered_proc[0] = 0;
-	for (i=0; i<200; i++) { rt_rq->ordered_se_array[i] = NULL; }
+	rt_rq->pos_in_mb_list = 0;
+	rt_rq->pos_in_ovs_list = 0;
+	sysctl_sched_number_middleboxes=0;
+	sysctl_sched_nb_ovs_threads=0;
+	sysctl_sched_ordered_mb[0]=0;
+	sysctl_sched_ovs_thr[0]=0;
+	for (i=0; i<201; i++) { rt_rq->ordered_mb_array[i]  = NULL; }
+	for (i=0; i<50;  i++) { rt_rq->ordered_ovs_array[i] = NULL; }
 #endif
 }
 
@@ -1058,12 +1063,19 @@ void dec_rt_tasks(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 }
 
 #ifdef CONFIG_SCHED_ORDERED
-static int inline is_ordered_proc(int pid, struct rt_rq *rt_rq) {
+static int inline is_mb(int pid, struct rt_rq *rt_rq) {
 	int i;
-	for (i=0; i<sysctl_sched_ordered_proc_number; i++) {
-		if (pid == sysctl_sched_ordered_proc[i]) { return i; }
+	for (i=0; i<sysctl_sched_number_middleboxes; i++) {
+		if (pid == sysctl_sched_ordered_mb[i]) { return i; }
 	}
-	return 0;
+	return -1;
+}
+static int inline is_ovs(int pid, struct rt_rq *rt_rq) {
+	int i;
+	for (i=0; i<sysctl_sched_nb_ovs_threads; i++) {
+		if (pid == sysctl_sched_ovs_thr[i]) { return i; }
+	}
+	return -1;
 }
 #endif
 
@@ -1152,7 +1164,7 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 {
 #ifdef CONFIG_SCHED_ORDERED
 	int pid = p->pid;
-	int idx;
+	int mb_idx,ovs_idx;
 	struct rt_rq *rt_rq = &rq->rt;
 #endif
 
@@ -1164,9 +1176,15 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 	enqueue_rt_entity(rt_se, flags & ENQUEUE_HEAD);
 
 #ifdef CONFIG_SCHED_ORDERED
-	idx=is_ordered_proc(pid,rt_rq);
-	if (idx) {
-		rt_rq->ordered_se_array[idx] = p;
+	mb_idx = is_mb(pid,rt_rq);
+	ovs_idx = is_ovs(pid,rt_rq);
+
+
+	if (mb_idx>=0) {
+		rt_rq->ordered_mb_array[mb_idx] = p;
+	}
+	else if(ovs_idx>=0) {
+		rt_rq->ordered_ovs_array[ovs_idx] = p;
 	}
 	else if (!task_current(rq,p) && p->nr_cpus_allowed > 1)
 		enqueue_pushable_task(rq, p);
@@ -1184,7 +1202,7 @@ static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 #ifdef CONFIG_SCHED_ORDERED
 	struct rt_rq *rt_rq = &rq->rt;
 	int pid = p->pid;
-	int idx;
+	int mb_idx,ovs_idx;
 #endif
 	struct sched_rt_entity *rt_se = &p->rt;
 
@@ -1195,9 +1213,13 @@ static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 
 	dec_nr_running(rq);
 #ifdef CONFIG_SCHED_ORDERED
-	idx=is_ordered_proc(pid,rt_rq);
-	if (idx) {
-		rt_rq->ordered_se_array[idx] = NULL;
+	mb_idx = is_mb(pid,rt_rq);
+	ovs_idx = is_ovs(pid,rt_rq);
+	if (mb_idx>=0) {
+		rt_rq->ordered_mb_array[mb_idx] = NULL;
+	}
+	else if(ovs_idx>=0) {
+		rt_rq->ordered_ovs_array[ovs_idx] = NULL;
 	}
 #endif
 }
@@ -1394,22 +1416,38 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 #ifdef CONFIG_SCHED_ORDERED
 	struct rt_rq *rt_rq;
 	struct task_struct *next_task_in_list;
-	int pos_in_list;
+	int pos_in_mb_list,pos_in_ovs_list;
 	rt_rq = &rq->rt;
-	pos_in_list = rt_rq->pos_in_list;
+	pos_in_mb_list = rt_rq->pos_in_mb_list;
+	pos_in_ovs_list = rt_rq->pos_in_ovs_list;
 
 	/*
 	 * This should be more integrated with the rest and not return that early
 	 */
-	if(sysctl_sched_ordered_proc_number && pos_in_list) {
-		/* Find next task in ordered list */
-		next_task_in_list = rt_rq->ordered_se_array[pos_in_list];
+	if(sysctl_sched_number_middleboxes && pos_in_mb_list) {
+		/* We're done with the OVS threads, select next MB */
+		if(pos_in_ovs_list==sysctl_sched_nb_ovs_threads || !sysctl_sched_nb_ovs_threads) {
+			/* Find next task in ordered list */
+			next_task_in_list = rt_rq->ordered_mb_array[pos_in_mb_list];
+			/* Move pointers */
+			rt_rq->pos_in_ovs_list=0;
+			rt_rq->pos_in_mb_list++;
+		}
+		/* Go to next OVS thread */
+		else {
+			next_task_in_list = rt_rq->ordered_ovs_array[pos_in_ovs_list];
+			rt_rq->pos_in_ovs_list++;
+		}
+
 		if(next_task_in_list && next_task_in_list->state==0) {
-			rt_rq->pos_in_list++;
 			next_task_in_list->se.exec_start = rq_clock_task(rq);
 			requeue_task_rt(rq, next_task_in_list, 0); // Put task back to the end of the queue
 			dequeue_pushable_task(rq, next_task_in_list); //Removes tasks from pushable
 			return next_task_in_list;
+		}
+		else {
+			rt_rq->pos_in_ovs_list = 0;
+			rt_rq->pos_in_mb_list = 0;
 		}
 	}
 #endif
@@ -1419,12 +1457,8 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 #ifdef CONFIG_SCHED_ORDERED
 
 	/* If this is the first process increment the pointer */
-	if(p && sysctl_sched_ordered_proc_number && (p->pid==sysctl_sched_ordered_proc[0])) {
-		rt_rq->pos_in_list=1;
-	}
-	/* Otherwise reset the pointer */
-	else if (sysctl_sched_ordered_proc_number){
-		rt_rq->pos_in_list=0;
+	if(p && sysctl_sched_number_middleboxes && (p->pid==sysctl_sched_ordered_mb[0])) {
+		rt_rq->pos_in_mb_list=1;
 	}
 #endif
 
