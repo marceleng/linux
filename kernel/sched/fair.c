@@ -3672,6 +3672,10 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 {
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
+#ifdef CONFIG_SCHED_ORDERED
+	int pid;
+	int mb_idx,ovs_idx;
+#endif
 
 	for_each_sched_entity(se) {
 		if (se->on_rq)
@@ -3702,7 +3706,26 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(cfs_rq);
 		update_entity_load_avg(se, 1);
 	}
-
+#ifdef CONFIG_SCHED_ORDERED
+	/*
+	 * Check whether the running queue is already initialized
+	 * Prevents panic during start_kernel()
+	 */
+	if(rq && p && se) {
+		pid = p->pid;
+		mb_idx = is_mb(pid);
+		ovs_idx = is_ovs(pid);
+		cfs_rq = cfs_rq_of(se);
+		if (mb_idx>=0) {
+			cfs_rq->ordered_mb_array[mb_idx] = p;
+			printk("Enqueued MB %d\n",pid);
+		}
+		else if(ovs_idx>=0) {
+			cfs_rq->ordered_ovs_array[ovs_idx] = p;
+			printk("Enqueued OVS %d\n",pid);
+		}
+	}
+#endif
 	if (!se) {
 		update_rq_runnable_avg(rq, rq->nr_running);
 		inc_nr_running(rq);
@@ -3722,6 +3745,10 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
 	int task_sleep = flags & DEQUEUE_SLEEP;
+#ifdef CONFIG_SCHED_ORDERED
+	int pid;
+	int mb_idx,ovs_idx;
+#endif
 
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
@@ -3763,6 +3790,20 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(cfs_rq);
 		update_entity_load_avg(se, 1);
 	}
+#ifdef CONFIG_SCHED_ORDERED
+	if(p && rq && se) {
+		pid = p->pid;
+		mb_idx = is_mb(pid);
+		ovs_idx = is_ovs(pid);
+		cfs_rq = cfs_rq_of(se);
+		if (mb_idx>=0) {
+			cfs_rq->ordered_mb_array[mb_idx] = NULL;
+		}
+		else if(ovs_idx>=0) {
+			cfs_rq->ordered_ovs_array[ovs_idx] = NULL;
+		}
+	}
+#endif
 
 	if (!se) {
 		dec_nr_running(rq);
@@ -4508,10 +4549,46 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 	struct task_struct *p;
 	struct cfs_rq *cfs_rq = &rq->cfs;
 	struct sched_entity *se;
+#ifdef CONFIG_SCHED_ORDERED
+	int pos_in_mb_list = cfs_rq->pos_in_mb_list;
+	int pos_in_ovs_list = cfs_rq->pos_in_ovs_list;
+#endif
 
 	if (!cfs_rq->nr_running)
 		return NULL;
 
+#ifdef CONFIG_SCHED_ORDERED
+	/*
+	 * This should be more integrated with the rest and not return that early
+	 */
+	if(sysctl_sched_number_middleboxes && pos_in_mb_list) {
+		/* We're done with the OVS threads, select next MB */
+		if(pos_in_ovs_list==sysctl_sched_nb_ovs_threads || !sysctl_sched_nb_ovs_threads) {
+			/* Find next task in ordered list */
+			p = cfs_rq->ordered_mb_array[pos_in_mb_list];
+			/* Move pointers */
+			cfs_rq->pos_in_ovs_list=0;
+			cfs_rq->pos_in_mb_list++;
+		}
+		/* Go to next OVS thread */
+		else {
+			p = cfs_rq->ordered_ovs_array[pos_in_ovs_list];
+			cfs_rq->pos_in_ovs_list++;
+		}
+
+		if (p && p->state==0) {
+			se = &p->se;
+			clear_buddies(cfs_rq,se);
+			set_next_entity(cfs_rq,se);
+			printk("SCHED_DEBUG: task %d\n",p->pid);
+			goto selected_p;
+		}
+		printk("Sorry, no task for %d,%d\n",pos_in_mb_list,pos_in_ovs_list);
+	}
+
+	/* Default to normal behaviour */
+	cfs_rq->pos_in_ovs_list = 0;
+	cfs_rq->pos_in_mb_list = 0;
 	do {
 		se = pick_next_entity(cfs_rq);
 		set_next_entity(cfs_rq, se);
@@ -4519,6 +4596,25 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 	} while (cfs_rq);
 
 	p = task_of(se);
+
+	/* If this is the first process increment the pointer */
+	if(p && sysctl_sched_number_middleboxes && (p->pid==sysctl_sched_ordered_mb[0])) {
+		cfs_rq = &rq->cfs;
+		cfs_rq->pos_in_mb_list=1;
+		printk("First task found in CFS");
+	}
+selected_p:
+#else
+	do {
+		se = pick_next_entity(cfs_rq);
+		set_next_entity(cfs_rq, se);
+		cfs_rq = group_cfs_rq(se);
+	} while (cfs_rq);
+
+	p = task_of(se);
+#endif
+
+
 	if (hrtick_enabled(rq))
 		hrtick_start_fair(rq, p);
 
@@ -7081,6 +7177,10 @@ static void set_curr_task_fair(struct rq *rq)
 
 void init_cfs_rq(struct cfs_rq *cfs_rq)
 {
+#ifdef CONFIG_SCHED_ORDERED
+	int i;
+#endif
+
 	cfs_rq->tasks_timeline = RB_ROOT;
 	cfs_rq->min_vruntime = (u64)(-(1LL << 20));
 #ifndef CONFIG_64BIT
@@ -7089,6 +7189,13 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
 #ifdef CONFIG_SMP
 	atomic64_set(&cfs_rq->decay_counter, 1);
 	atomic_long_set(&cfs_rq->removed_load, 0);
+#endif
+
+#ifdef CONFIG_SCHED_ORDERED
+	cfs_rq->pos_in_mb_list = 0;
+	cfs_rq->pos_in_ovs_list = 0;
+	for (i=0; i<201; i++) { cfs_rq->ordered_mb_array[i]  = NULL; }
+	for (i=0; i<50;  i++) { cfs_rq->ordered_ovs_array[i] = NULL; }
 #endif
 }
 

@@ -6,18 +6,9 @@
 
 #include "sched.h"
 #include <linux/slab.h>
-#include <linux/sched/sysctl.h>
-#include <linux/hashtable.h>
 #include <linux/printk.h>
 
 int sched_rr_timeslice = RR_TIMESLICE;
-
-#ifdef CONFIG_SCHED_ORDERED
-unsigned int sysctl_sched_number_middleboxes;
-unsigned int sysctl_sched_nb_ovs_threads;
-unsigned int sysctl_sched_ordered_mb[200];
-unsigned int sysctl_sched_ovs_thr[50];
-#endif
 
 static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun);
 
@@ -98,10 +89,6 @@ void init_rt_rq(struct rt_rq *rt_rq, struct rq *rq)
 #ifdef CONFIG_SCHED_ORDERED
 	rt_rq->pos_in_mb_list = 0;
 	rt_rq->pos_in_ovs_list = 0;
-	sysctl_sched_number_middleboxes=0;
-	sysctl_sched_nb_ovs_threads=0;
-	sysctl_sched_ordered_mb[0]=0;
-	sysctl_sched_ovs_thr[0]=0;
 	for (i=0; i<201; i++) { rt_rq->ordered_mb_array[i]  = NULL; }
 	for (i=0; i<50;  i++) { rt_rq->ordered_ovs_array[i] = NULL; }
 #endif
@@ -1062,23 +1049,6 @@ void dec_rt_tasks(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 	dec_rt_group(rt_se, rt_rq);
 }
 
-#ifdef CONFIG_SCHED_ORDERED
-static int inline is_mb(int pid, struct rt_rq *rt_rq) {
-	int i;
-	for (i=0; i<sysctl_sched_number_middleboxes; i++) {
-		if (pid == sysctl_sched_ordered_mb[i]) { return i; }
-	}
-	return -1;
-}
-static int inline is_ovs(int pid, struct rt_rq *rt_rq) {
-	int i;
-	for (i=0; i<sysctl_sched_nb_ovs_threads; i++) {
-		if (pid == sysctl_sched_ovs_thr[i]) { return i; }
-	}
-	return -1;
-}
-#endif
-
 static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, bool head)
 {
 	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
@@ -1176,8 +1146,8 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 	enqueue_rt_entity(rt_se, flags & ENQUEUE_HEAD);
 
 #ifdef CONFIG_SCHED_ORDERED
-	mb_idx = is_mb(pid,rt_rq);
-	ovs_idx = is_ovs(pid,rt_rq);
+	mb_idx = is_mb(pid);
+	ovs_idx = is_ovs(pid);
 
 
 	if (mb_idx>=0) {
@@ -1213,8 +1183,8 @@ static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 
 	dec_nr_running(rq);
 #ifdef CONFIG_SCHED_ORDERED
-	mb_idx = is_mb(pid,rt_rq);
-	ovs_idx = is_ovs(pid,rt_rq);
+	mb_idx = is_mb(pid);
+	ovs_idx = is_ovs(pid);
 	if (mb_idx>=0) {
 		rt_rq->ordered_mb_array[mb_idx] = NULL;
 	}

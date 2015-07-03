@@ -112,6 +112,23 @@ struct rt_bandwidth {
 
 extern struct mutex sched_domains_mutex;
 
+#ifdef CONFIG_SCHED_ORDERED
+static int inline is_mb(int pid) {
+	int i;
+	for (i=0; i<sysctl_sched_number_middleboxes; i++) {
+		if (pid == sysctl_sched_ordered_mb[i]) { return i; }
+	}
+	return -1;
+}
+static int inline is_ovs(int pid) {
+	int i;
+	for (i=0; i<sysctl_sched_nb_ovs_threads; i++) {
+		if (pid == sysctl_sched_ovs_thr[i]) { return i; }
+	}
+	return -1;
+}
+#endif
+
 #ifdef CONFIG_CGROUP_SCHED
 
 #include <linux/cgroup.h>
@@ -266,6 +283,16 @@ struct cfs_rq {
 	 * It is set to NULL otherwise (i.e when none are currently running).
 	 */
 	struct sched_entity *curr, *next, *last, *skip;
+
+#ifdef CONFIG_SCHED_ORDERED
+	/*Pointer towards the current positions in the list of ordered process*/
+	int pos_in_mb_list;
+	int pos_in_ovs_list;
+	/*Pointers storing the structures  */
+	/*The 201st element is always NULL and indicates the end of the array */
+	struct task_struct* ordered_mb_array[201]; //TODO: make it less dirty
+	struct task_struct* ordered_ovs_array[50];
+#endif
 
 #ifdef	CONFIG_SCHED_DEBUG
 	unsigned int nr_spread_over;

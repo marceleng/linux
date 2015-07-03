@@ -296,7 +296,12 @@ __read_mostly int scheduler_running;
  */
 int sysctl_sched_rt_runtime = 950000;
 
-
+#ifdef CONFIG_SCHED_ORDERED
+unsigned int sysctl_sched_number_middleboxes;
+unsigned int sysctl_sched_nb_ovs_threads;
+unsigned int sysctl_sched_ordered_mb[200];
+unsigned int sysctl_sched_ovs_thr[50];
+#endif
 
 /*
  * __task_rq_lock - lock the rq @p resides on.
@@ -6261,6 +6266,13 @@ void __init sched_init(void)
 
 #endif /* CONFIG_CGROUP_SCHED */
 
+#ifdef CONFIG_SCHED_ORDERED
+	sysctl_sched_number_middleboxes=0;
+	sysctl_sched_nb_ovs_threads=0;
+	sysctl_sched_ordered_mb[0]=0;
+	sysctl_sched_ovs_thr[0]=0;
+#endif
+
 	for_each_possible_cpu(i) {
 		struct rq *rq;
 
@@ -6917,6 +6929,66 @@ int sched_rr_handler(struct ctl_table *table, int write,
 	mutex_unlock(&mutex);
 	return ret;
 }
+
+#ifdef CONFIG_SCHED_ORDERED
+int sched_mb_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp,
+		loff_t *ppos)
+{
+	int ret,i;
+	struct task_struct *t;
+	struct rq *rq;
+	struct cfs_rq *cfs_rq;
+	struct rt_rq *rt_rq;
+	static DEFINE_MUTEX(mutex);
+
+	mutex_lock(&mutex);
+	ret = proc_dointvec(table, write, buffer, lenp, ppos);
+	printk("DEBUG_SCHED: Write in mb_pids\n")
+	/*If it's a write, we put the corresponding tasks in their respective pointers */
+	if (!ret && write) {
+		for(i=0; i<200; i++) {
+			if(!sysctl_sched_ordered_mb[i]) {
+				sysctl_sched_number_middleboxes = sysctl_sched_number_middleboxes > i ?
+						i : sysctl_sched_number_middleboxes;
+				break;
+			}
+			t=find_process_by_pid(sysctl_sched_ordered_mb[i]);
+			if(t) {
+				rq = task_rq(t);
+				if(rq) {
+					cfs_rq = &rq->cfs;
+					if (likely(cfs_rq))
+						cfs_rq->ordered_mb_array[i] = t;
+					rt_rq = &rq->rt;
+					if (likely(rt_rq))
+						rt_rq->ordered_mb_array[i] = t;
+				}
+			}
+			else { printk("DEBUG_SCHED: Task %d not found\n",sysctl_sched_ordered_mb[i]); }
+		}
+	}
+	mutex_unlock(&mutex);
+	return ret;
+}
+
+int sched_ovs_handler(struct ctl_table *table, int write,
+			void __user *buffer, size_t *lenp,
+			loff_t *ppos)
+{
+	int ret,i;
+	static DEFINE_MUTEX(mutex);
+
+	mutex_lock(&mutex);
+	ret = proc_dointvec(table, write, buffer, lenp, ppos);
+
+	if (!ret && write) {
+
+	}
+	mutex_unlock(&mutex);
+	return ret;
+}
+#endif
 
 int sched_rt_handler(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp,

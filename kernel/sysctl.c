@@ -456,7 +456,7 @@ static struct ctl_table kern_table[] = {
 		.data       = &sysctl_sched_ordered_mb[0],
 		.maxlen     = 200*sizeof(unsigned int),
 		.mode       = 0644,
-		.proc_handler = proc_dointvec,
+		.proc_handler = sched_mb_handler,
 	},
 	{
 		.procname   = "sched_nb_ovs_threads",
@@ -470,7 +470,7 @@ static struct ctl_table kern_table[] = {
 		.data       = &sysctl_sched_ovs_thr[0],
 		.maxlen     = 50*sizeof(unsigned int),
 		.mode       = 0644,
-		.proc_handler = proc_dointvec,
+		.proc_handler = sched_ovs_handler,
 	},
 #endif
 #ifdef CONFIG_CFS_BANDWIDTH
