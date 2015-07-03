@@ -6944,7 +6944,7 @@ int sched_mb_handler(struct ctl_table *table, int write,
 
 	mutex_lock(&mutex);
 	ret = proc_dointvec(table, write, buffer, lenp, ppos);
-	printk("DEBUG_SCHED: Write in mb_pids\n")
+
 	/*If it's a write, we put the corresponding tasks in their respective pointers */
 	if (!ret && write) {
 		for(i=0; i<200; i++) {

@@ -4580,10 +4580,10 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 			se = &p->se;
 			clear_buddies(cfs_rq,se);
 			set_next_entity(cfs_rq,se);
-			printk("SCHED_DEBUG: task %d\n",p->pid);
+			printk_sched("SCHED_DEBUG: task %d at %d,%d\n",p->pid,pos_in_mb_list,pos_in_ovs_list);
 			goto selected_p;
 		}
-		printk("Sorry, no task for %d,%d\n",pos_in_mb_list,pos_in_ovs_list);
+		printk_sched("Sorry, no task for %d,%d\n",pos_in_mb_list,pos_in_ovs_list);
 	}
 
 	/* Default to normal behaviour */
@@ -4601,7 +4601,7 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 	if(p && sysctl_sched_number_middleboxes && (p->pid==sysctl_sched_ordered_mb[0])) {
 		cfs_rq = &rq->cfs;
 		cfs_rq->pos_in_mb_list=1;
-		printk("First task found in CFS");
+		printk_sched("First task found in CFS");
 	}
 selected_p:
 #else
