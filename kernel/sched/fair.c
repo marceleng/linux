@@ -2655,8 +2655,10 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 
 	clear_buddies(cfs_rq, se);
 
-	if (se != cfs_rq->curr)
+	if (se != cfs_rq->curr && se->on_rq) {
+		printk("Dequeueing task %d because current is %d\n",task_of(se)->pid,task_of(cfs_rq->curr)->pid);
 		__dequeue_entity(cfs_rq, se);
+	}
 	se->on_rq = 0;
 	account_entity_dequeue(cfs_rq, se);
 

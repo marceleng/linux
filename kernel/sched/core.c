@@ -6977,13 +6977,36 @@ int sched_ovs_handler(struct ctl_table *table, int write,
 			loff_t *ppos)
 {
 	int ret,i;
+	struct task_struct *t;
+	struct rq *rq;
+	struct cfs_rq *cfs_rq;
+	struct rt_rq *rt_rq;
 	static DEFINE_MUTEX(mutex);
 
 	mutex_lock(&mutex);
 	ret = proc_dointvec(table, write, buffer, lenp, ppos);
 
 	if (!ret && write) {
-
+		for(i=0; i<200; i++) {
+			if(!sysctl_sched_ovs_thr[i]) {
+				sysctl_sched_nb_ovs_threads = sysctl_sched_nb_ovs_threads > i ?
+						i : sysctl_sched_nb_ovs_threads;
+				break;
+			}
+			t=find_process_by_pid(sysctl_sched_ovs_thr[i]);
+			if(t) {
+				rq = task_rq(t);
+				if(rq) {
+					cfs_rq = &rq->cfs;
+					if (likely(cfs_rq))
+						cfs_rq->ordered_ovs_array[i] = t;
+					rt_rq = &rq->rt;
+					if (likely(rt_rq))
+						rt_rq->ordered_ovs_array[i] = t;
+				}
+			}
+			else { printk("DEBUG_SCHED: Task %d not found\n",sysctl_sched_ordered_mb[i]); }
+		}
 	}
 	mutex_unlock(&mutex);
 	return ret;
