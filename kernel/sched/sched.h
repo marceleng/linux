@@ -284,16 +284,6 @@ struct cfs_rq {
 	 */
 	struct sched_entity *curr, *next, *last, *skip;
 
-#ifdef CONFIG_SCHED_ORDERED
-	/*Pointer towards the current positions in the list of ordered process*/
-	int pos_in_mb_list;
-	int pos_in_ovs_list;
-	/*Pointers storing the structures  */
-	/*The 201st element is always NULL and indicates the end of the array */
-	struct task_struct* ordered_mb_array[201]; //TODO: make it less dirty
-	struct task_struct* ordered_ovs_array[50];
-#endif
-
 #ifdef	CONFIG_SCHED_DEBUG
 	unsigned int nr_spread_over;
 #endif

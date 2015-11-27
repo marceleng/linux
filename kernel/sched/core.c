@@ -6938,7 +6938,6 @@ int sched_mb_handler(struct ctl_table *table, int write,
 	int ret,i;
 	struct task_struct *t;
 	struct rq *rq;
-	struct cfs_rq *cfs_rq;
 	struct rt_rq *rt_rq;
 	static DEFINE_MUTEX(mutex);
 
@@ -6957,9 +6956,6 @@ int sched_mb_handler(struct ctl_table *table, int write,
 			if(t) {
 				rq = task_rq(t);
 				if(rq) {
-					cfs_rq = &rq->cfs;
-					if (likely(cfs_rq))
-						cfs_rq->ordered_mb_array[i] = t;
 					rt_rq = &rq->rt;
 					if (likely(rt_rq))
 						rt_rq->ordered_mb_array[i] = t;
@@ -6979,7 +6975,6 @@ int sched_ovs_handler(struct ctl_table *table, int write,
 	int ret,i;
 	struct task_struct *t;
 	struct rq *rq;
-	struct cfs_rq *cfs_rq;
 	struct rt_rq *rt_rq;
 	static DEFINE_MUTEX(mutex);
 
@@ -6997,9 +6992,6 @@ int sched_ovs_handler(struct ctl_table *table, int write,
 			if(t) {
 				rq = task_rq(t);
 				if(rq) {
-					cfs_rq = &rq->cfs;
-					if (likely(cfs_rq))
-						cfs_rq->ordered_ovs_array[i] = t;
 					rt_rq = &rq->rt;
 					if (likely(rt_rq))
 						rt_rq->ordered_ovs_array[i] = t;
