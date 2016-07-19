@@ -1,3 +1,9 @@
+*** DISCLAIMER ***
+This version of the linux kernel is modified and unstable, use at your own risks.
+The API in sysctl allows to specify a list of processes to run in a specific order
+It only works with SCHED_RR
+******************
+
         Linux kernel release 3.x <http://kernel.org/>
 
 These are the release notes for Linux version 3.  Read them carefully,
